@@ -110,6 +110,9 @@ public:
 
 	static bool ExitRunLoop;
 	static Uint32 PaintEventNumber;
+	// Controller buttons become key presses unless the application reads the
+	// pad itself (DisplayBackend::SetGamepadKeyEmulation).
+	static bool GamepadKeyEmulation;
 	static std::unordered_map<int, SDL2DisplayWindow*> WindowList;
 
 	static std::unordered_map<void *, void *> TimerHandles;

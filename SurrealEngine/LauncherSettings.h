@@ -55,6 +55,19 @@ public:
 		int LastSelected = -1;
 	} Games;
 
+	// Controller support (Engine::UpdateGamepad). Layout is the name of the
+	// binding preset a launcher last applied; the engine only carries it.
+	struct
+	{
+		bool Enabled = true;
+		float DeadZone = 0.2f;
+		float LookSensitivityX = 1.0f;
+		float LookSensitivityY = 1.0f;
+		bool InvertY = false;
+		float CursorSpeed = 1.0f;
+		std::string Layout = "modern";
+	} Gamepad;
+
 private:
 	LauncherSettings();
 };

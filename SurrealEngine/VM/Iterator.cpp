@@ -1,6 +1,7 @@
 
 #include "Precomp.h"
 #include "Iterator.h"
+#include "Packages/Core/UClass.h"
 #include "Utils/File.h"
 #include "Utils/StrTools.h"
 #include "Engine.h"
@@ -171,27 +172,39 @@ bool ChildActorsIterator::Next()
 }
 
 /////////////////////////////////////////////////////////////////////////////
-CycleActorsIterator::CycleActorsIterator(UObject* BaseClass, UObject** Actor, int* outIndex)  : BaseClass(BaseClass), Actor(Actor), outIndex(outIndex)  
-{  
-	for (UActor* levelActor : engine->Level->Actors)  
-	{  
-		if (levelActor && levelActor->IsA(BaseClass->Name))  
-			matchedActors.push_back(levelActor); 
-	}  
-	totalActors = matchedActors.size();  
-}  
+CycleActorsIterator::CycleActorsIterator(UObject* BaseClass, UObject** Actor, int* outIndex) : BaseClass(UObject::TryCast<UStruct>(BaseClass)), Actor(Actor), outIndex(outIndex)
+{
+	size_t size = engine->Level->Actors.size();
+	position = (outIndex && *outIndex >= 0 && (size_t)*outIndex < size) ? (size_t)*outIndex : 0;
+}
 
-bool CycleActorsIterator::Next()  
-{  
-	if (matchedActors.empty()) return false;  
-	if (currentIndex >= matchedActors.size())  
-	{  
-		return false;  
-	}  
-	*Actor = matchedActors[currentIndex];  
-	if (outIndex) *outIndex = static_cast<int>(currentIndex);  
-	++currentIndex;  
-	return true;  
+bool CycleActorsIterator::Next()
+{
+	const Array<UActor*>& actors = engine->Level->Actors;
+	size_t size = actors.size();
+	while (BaseClass && size > 0 && visited < size)
+	{
+		visited++;
+		position = (position + 1) % size;
+		UActor* candidate = actors[position];
+		if (!candidate || candidate->bDeleteMe())
+			continue;
+
+		// Class pointers along the BaseStruct chain: the same test as
+		// IsA(BaseClass->Name) without a name comparison per level.
+		for (UStruct* cls = candidate->Class; cls; cls = cls->BaseStruct)
+		{
+			if (cls == BaseClass)
+			{
+				*Actor = candidate;
+				if (outIndex)
+					*outIndex = (int)position;
+				return true;
+			}
+		}
+	}
+	*Actor = nullptr;
+	return false;
 }
 
 /////////////////////////////////////////////////////////////////////////////

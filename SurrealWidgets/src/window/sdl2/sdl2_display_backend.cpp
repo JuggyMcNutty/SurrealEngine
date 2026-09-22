@@ -62,6 +62,54 @@ SDL2DisplayBackend::SDL2DisplayBackend()
 	}
 }
 
+bool SDL2DisplayBackend::GetGamepadState(GamepadState& state)
+{
+	state = {};
+
+	// Controllers can be plugged in or out at any time; keep the first
+	// attached one, and look again when it goes away. Opening is
+	// reference-counted, so reopening one the constructor opened is harmless.
+	if (Gamepad && !SDL_GameControllerGetAttached(Gamepad))
+	{
+		SDL_GameControllerClose(Gamepad);
+		Gamepad = nullptr;
+	}
+	if (!Gamepad)
+	{
+		for (int i = 0; i < SDL_NumJoysticks() && !Gamepad; i++)
+		{
+			if (SDL_IsGameController(i))
+				Gamepad = SDL_GameControllerOpen(i);
+		}
+	}
+	if (!Gamepad)
+		return false;
+
+	static const SDL_GameControllerAxis axes[(int)GamepadAxis::Count] =
+	{
+		SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY,
+		SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY,
+		SDL_CONTROLLER_AXIS_TRIGGERLEFT, SDL_CONTROLLER_AXIS_TRIGGERRIGHT
+	};
+	for (int i = 0; i < (int)GamepadAxis::Count; i++)
+	{
+		float v = SDL_GameControllerGetAxis(Gamepad, axes[i]) / 32767.0f;
+		state.Axes[i] = v < -1.0f ? -1.0f : v > 1.0f ? 1.0f : v;
+	}
+
+	// GamepadButton follows SDL's own order, so the index carries over.
+	for (int i = 0; i < (int)GamepadButton::Count; i++)
+		state.Buttons[i] = SDL_GameControllerGetButton(Gamepad, (SDL_GameControllerButton)i) != 0;
+
+	state.Connected = true;
+	return true;
+}
+
+void SDL2DisplayBackend::SetGamepadKeyEmulation(bool enable)
+{
+	SDL2DisplayWindow::GamepadKeyEmulation = enable;
+}
+
 std::unique_ptr<DisplayWindow> SDL2DisplayBackend::Create(DisplayWindowHost* windowHost, WidgetType type, DisplayWindow* owner, RenderAPI renderAPI)
 {
 	return std::make_unique<SDL2DisplayWindow>(windowHost, type, static_cast<SDL2DisplayWindow*>(owner), renderAPI, UIScale);

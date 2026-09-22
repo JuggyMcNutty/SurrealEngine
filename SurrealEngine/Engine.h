@@ -9,6 +9,7 @@
 #include "Packages/Engine/Actors/UActor.h"
 #include "UnrealURL.h"
 #include "GameFolder.h"
+#include "GamepadInput.h"
 #include <set>
 #include <list>
 
@@ -215,6 +216,8 @@ public:
 
 	std::map<std::string, EInputKey> activeInputButtons;
 	std::map<std::string, ActiveInputAxis> activeInputAxes;
+
+	GamepadInput gamepad;
 
 	std::function<void()> tickDebugger;
 

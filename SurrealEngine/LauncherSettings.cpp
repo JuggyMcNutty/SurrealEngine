@@ -66,6 +66,17 @@ LauncherSettings::LauncherSettings()
 			Games.SearchList.push_back(jsonItem.to_string());
 		}
 		Games.LastSelected = settings["Games"]["LastSelected"].to_int();
+
+		// Absent members keep their defaults: a missing bool would otherwise
+		// read as false and quietly turn controller support off.
+		const JsonValue& pad = settings["Gamepad"];
+		if (!pad["Enabled"].is_undefined()) Gamepad.Enabled = pad["Enabled"].to_boolean();
+		if (!pad["DeadZone"].is_undefined()) Gamepad.DeadZone = (float)pad["DeadZone"].to_number();
+		if (!pad["LookSensitivityX"].is_undefined()) Gamepad.LookSensitivityX = (float)pad["LookSensitivityX"].to_number();
+		if (!pad["LookSensitivityY"].is_undefined()) Gamepad.LookSensitivityY = (float)pad["LookSensitivityY"].to_number();
+		if (!pad["InvertY"].is_undefined()) Gamepad.InvertY = pad["InvertY"].to_boolean();
+		if (!pad["CursorSpeed"].is_undefined()) Gamepad.CursorSpeed = (float)pad["CursorSpeed"].to_number();
+		if (!pad["Layout"].is_undefined()) Gamepad.Layout = pad["Layout"].to_string();
 	}
 	catch (...)
 	{
@@ -120,9 +131,19 @@ void LauncherSettings::Save()
 	games["SearchList"] = JsonValue::array(Games.SearchList);
 	games["LastSelected"] = JsonValue::number(Games.LastSelected);
 
+	JsonValue pad = JsonValue::object();
+	pad["Enabled"] = JsonValue::boolean(Gamepad.Enabled);
+	pad["DeadZone"] = JsonValue::number(Gamepad.DeadZone);
+	pad["LookSensitivityX"] = JsonValue::number(Gamepad.LookSensitivityX);
+	pad["LookSensitivityY"] = JsonValue::number(Gamepad.LookSensitivityY);
+	pad["InvertY"] = JsonValue::boolean(Gamepad.InvertY);
+	pad["CursorSpeed"] = JsonValue::number(Gamepad.CursorSpeed);
+	pad["Layout"] = JsonValue::string(Gamepad.Layout);
+
 	JsonValue settings = JsonValue::object();
 	settings["RenderDevice"] = std::move(rendev);
 	settings["Games"] = std::move(games);
+	settings["Gamepad"] = std::move(pad);
 
 	const std::string filename = GetSettingsFilename();
 	Directory::create(fs::path(filename).parent_path().string());

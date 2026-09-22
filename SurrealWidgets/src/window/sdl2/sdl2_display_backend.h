@@ -1,5 +1,7 @@
 #pragma once
 
+#include <SDL2/SDL_gamecontroller.h>
+
 #include "window/window.h"
 
 class SDL2DisplayBackend : public DisplayBackend
@@ -17,8 +19,12 @@ public:
 
 	Size GetScreenSize() override;
 
+	bool GetGamepadState(GamepadState& state) override;
+	void SetGamepadKeyEmulation(bool enable) override;
+
 	bool IsSDL2() override { return true; }
 
 private:
 	double UIScale = 1.0;
+	SDL_GameController* Gamepad = nullptr;
 };

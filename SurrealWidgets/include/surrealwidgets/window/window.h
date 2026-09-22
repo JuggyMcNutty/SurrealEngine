@@ -383,6 +383,23 @@ public:
 	virtual GLFuncPtr GetGLProcAddress(const char* name) { throw std::runtime_error("GetGLProcAddress not supported for this backend"); }
 };
 
+// A game controller's state, polled once per frame by an application that
+// wants the pad as an analog device rather than as emulated keys.
+enum class GamepadAxis { LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count };
+enum class GamepadButton
+{
+	A, B, X, Y, Back, Guide, Start, LeftStick, RightStick, LeftShoulder, RightShoulder,
+	DpadUp, DpadDown, DpadLeft, DpadRight, Count
+};
+
+struct GamepadState
+{
+	bool Connected = false;
+	// Sticks -1..1 with right and down positive; triggers 0..1.
+	float Axes[(int)GamepadAxis::Count] = {};
+	bool Buttons[(int)GamepadButton::Count] = {};
+};
+
 class DisplayBackend
 {
 public:
@@ -416,6 +433,16 @@ public:
 	virtual void StopTimer(void* timerID) = 0;
 
 	virtual Size GetScreenSize() = 0;
+
+	// The first connected controller. Backends without controller support
+	// report none.
+	virtual bool GetGamepadState(GamepadState& state) { state = {}; return false; }
+
+	// By default a backend may turn controller buttons into key presses
+	// (A as Enter, the d-pad as arrow keys) so launcher UIs work with a pad.
+	// An application reading GetGamepadState turns that off, or every button
+	// would arrive twice.
+	virtual void SetGamepadKeyEmulation(bool enable) {}
 
 	virtual std::unique_ptr<OpenFileDialog> CreateOpenFileDialog(DisplayWindow* owner);
 	virtual std::unique_ptr<SaveFileDialog> CreateSaveFileDialog(DisplayWindow* owner);

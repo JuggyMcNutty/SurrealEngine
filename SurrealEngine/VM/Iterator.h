@@ -111,18 +111,22 @@ public:
 	Array<UActor*>::iterator iterator;
 };
 
+// Deus Ex's resumable scan (native 1002). Index is the level-actor index of
+// the last actor returned; each call continues after it, wraps at the end of
+// the list and stops after one full lap. ScriptedPawn.CheckEnemyPresence
+// relies on all three: it checks ~20 candidates a tick, keeps CycleIndex
+// between ticks, and treats "Index went down" as "cycled through everyone".
 class CycleActorsIterator : public Iterator
 {
 public:
 	CycleActorsIterator(UObject* BaseClass, UObject** Actor, int* outIndex);
 	bool Next() override;
 private:
-	UObject* BaseClass = nullptr;
+	UStruct* BaseClass = nullptr;
 	UObject** Actor = nullptr;
 	int* outIndex = nullptr;
-	size_t currentIndex = 0;
-	size_t totalActors = 0;
-	Array<UActor*> matchedActors;
+	size_t position = 0;
+	size_t visited = 0;
 };
 
 class IntDescIterator : public Iterator

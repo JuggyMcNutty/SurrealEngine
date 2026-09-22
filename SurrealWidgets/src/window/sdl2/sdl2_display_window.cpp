@@ -8,6 +8,7 @@
 
 Uint32 SDL2DisplayWindow::PaintEventNumber = 0xffffffff;
 bool SDL2DisplayWindow::ExitRunLoop;
+bool SDL2DisplayWindow::GamepadKeyEmulation = true;
 std::unordered_map<int, SDL2DisplayWindow*> SDL2DisplayWindow::WindowList;
 
 SDL2DisplayWindow::SDL2DisplayWindow(DisplayWindowHost* windowHost, WidgetType type, SDL2DisplayWindow* owner, RenderAPI renderAPI, double uiscale) : WindowHost(windowHost), UIScale(uiscale)
@@ -486,6 +487,9 @@ void SDL2DisplayWindow::DispatchEvent(const SDL_Event& event)
 		eventFrame = event.common.timestamp / 10;
 		joyDown = keyDown = false;
 	}
+
+	if (!GamepadKeyEmulation && (event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERBUTTONUP))
+		return;
 
 	if (event.type == SDL_CONTROLLERBUTTONDOWN) joyDown = true;
 	if (event.type == SDL_KEYDOWN) keyDown = true;

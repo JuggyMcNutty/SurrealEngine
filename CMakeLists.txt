@@ -44,6 +44,8 @@ set(SURREALCOMMON_SOURCES
 	SurrealEngine/GameFolder.h
 	SurrealEngine/LauncherSettings.cpp
 	SurrealEngine/LauncherSettings.h
+	SurrealEngine/GamepadInput.cpp
+	SurrealEngine/GamepadInput.h
 	SurrealEngine/GameWindow.cpp
 	SurrealEngine/GameWindow.h
 	SurrealEngine/UE1GameDatabase.h

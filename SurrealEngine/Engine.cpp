@@ -509,6 +509,8 @@ UnrealMipmap* Engine::PlayVideo(VideoPlayer* video, UnrealMipmap* background)
 
 		audiodev->GetDevice()->Update();
 		GameWindow::ProcessEvents();
+		if (gamepad.PollSkip())
+			skipAvi = true;
 
 		if (frame)
 		{
@@ -823,6 +825,26 @@ void Engine::LoadFromSaveFile(const UnrealURL& url)
 		Exception::Throw("Save file has no GameInfo actor for " + LevelPackage->GetPackageName().ToString() + "!");
 }
 
+// Deus Ex's ShowMainMenu sets the travel variable bIgnoreNextShowMenu when
+// Escape (or a pad's START) skips the intro, to swallow a second menu event
+// the original engine delivered for that same press. Surreal Engine delivers
+// one, so the flag would carry into the first level and eat the player's
+// first real attempt to open the menu. Nothing else sets it; clear it once a
+// level is running.
+static void ClearIgnoreNextShowMenu(UObject* player)
+{
+	if (!player)
+		return;
+	for (UProperty* prop : player->PropertyData.Class->Properties)
+	{
+		if (prop->Name == "bIgnoreNextShowMenu")
+		{
+			player->SetBool(prop->Name, false);
+			return;
+		}
+	}
+}
+
 void Engine::PossessSavedPlayer()
 {
 	// Loading a save must not reuse LoginPlayer, because that always calls GameInfo.Login,
@@ -857,6 +879,9 @@ void Engine::PossessSavedPlayer()
 	viewport->Actor() = pawn;
 	viewport->Actor()->Player() = viewport;
 	CallEvent(viewport->Actor(), EventName::Possess);
+
+	if (LaunchInfo.IsDeusEx())
+		ClearIgnoreNextShowMenu(pawn);
 
 	render->OnMapLoaded();
 }
@@ -1017,6 +1042,9 @@ void Engine::LoginPlayer()
 
 	CallEvent(pawn, EventName::TravelPostAccept);
 	CallEvent(LevelInfo->Game(), EventName::PostLogin, { ExpressionValue::ObjectValue(pawn) });
+
+	if (LaunchInfo.IsDeusEx())
+		ClearIgnoreNextShowMenu(pawn);
 
 	render->OnMapLoaded();
 }
@@ -1523,6 +1551,7 @@ void Engine::UpdateInput(float timeElapsed)
 		return;
 
 	TickWindow();
+	gamepad.Update(this, timeElapsed);
 	if (tickDebugger)
 		tickDebugger();
 
