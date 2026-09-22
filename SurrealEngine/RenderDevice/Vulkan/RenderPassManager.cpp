@@ -8,7 +8,7 @@
 
 RenderPassManager::RenderPassManager(VulkanRenderDevice* renderer) : renderer(renderer)
 {
-	CreateSceneBindlessPipelineLayout();
+	CreateScenePipelineLayout();
 	CreatePostprocessRenderPass();
 	CreatePresentPipelineLayout();
 	CreateScreenshotPipeline();
@@ -20,12 +20,12 @@ RenderPassManager::~RenderPassManager()
 {
 }
 
-void RenderPassManager::CreateSceneBindlessPipelineLayout()
+void RenderPassManager::CreateScenePipelineLayout()
 {
-	Scene.BindlessPipelineLayout = PipelineLayoutBuilder()
-		.AddSetLayout(renderer->DescriptorSets->GetTextureBindlessLayout())
+	Scene.PipelineLayout = PipelineLayoutBuilder()
+		.AddSetLayout(renderer->DescriptorSets->GetTextureSetLayout())
 		.AddPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ScenePushConstants))
-		.DebugName("SceneBindlessPipelineLayout")
+		.DebugName("ScenePipelineLayout")
 		.Create(renderer->Device.get());
 }
 
@@ -98,7 +98,7 @@ void RenderPassManager::CreatePipelines()
 	const std::vector<uint32_t>& vertShader = renderer->Shaders->Scene.VertexShader;
 	const std::vector<uint32_t>& fragShader = renderer->Shaders->Scene.FragmentShader;
 	const std::vector<uint32_t>& fragShaderAlphaTest = renderer->Shaders->Scene.FragmentShaderAlphaTest;
-	VulkanPipelineLayout* layout = Scene.BindlessPipelineLayout.get();
+	VulkanPipelineLayout* layout = Scene.PipelineLayout.get();
 	static const char* debugName = "ScenePipeline";
 
 	for (int i = 0; i < 33; i++)

@@ -8,7 +8,10 @@
 
 DescriptorSetManager::DescriptorSetManager(VulkanRenderDevice* renderer) : renderer(renderer)
 {
-	CreateBindlessTextureSet();
+	if (renderer->SupportsBindless)
+		CreateBindlessTextureSet();
+	else
+		CreateSceneTextureLayout();
 	CreatePresentLayout();
 	CreatePresentSet();
 	CreateBloomLayout();
@@ -23,6 +26,11 @@ void DescriptorSetManager::ClearCache()
 {
 	Textures.WriteBindless = WriteDescriptors();
 	Textures.NextBindlessIndex = 0;
+
+	Textures.SceneSetCache.clear();
+	Textures.SceneSets.clear();
+	Textures.ScenePools.clear();
+	Textures.ScenePoolSetsLeft = 0;
 }
 
 int DescriptorSetManager::GetTextureArrayIndex(uint32_t PolyFlags, CachedTexture* tex, bool clamp)
@@ -66,6 +74,53 @@ int DescriptorSetManager::GetTextureArrayIndex(uint32_t PolyFlags, CachedTexture
 	return index;
 }
 
+VulkanDescriptorSet* DescriptorSetManager::GetTextureSet(uint32_t PolyFlags, CachedTexture* tex, CachedTexture* lightmap, CachedTexture* macrotex, CachedTexture* detailtex, bool clamp)
+{
+	uint32_t samplermode = 0;
+	if (PolyFlags & PF_NoSmooth) samplermode |= 1;
+	if (clamp) samplermode |= 2;
+
+	TexDescriptorKey key(tex, lightmap, detailtex, macrotex, samplermode);
+	auto it = Textures.SceneSetCache.find(key);
+	if (it != Textures.SceneSetCache.end())
+		return it->second;
+
+	VulkanDescriptorSet* descriptorSet = AllocSceneTextureSet();
+
+	// The sampler mode only applies to the surface texture, as in the bindless path.
+	VulkanSampler* sampler = renderer->Samplers->Samplers[samplermode].get();
+	VulkanSampler* plainSampler = renderer->Samplers->Samplers[0].get();
+	VulkanImageView* nulltex = renderer->Textures->NullTextureView.get();
+
+	// Binding order matches textureBinds.xyzw in the bindless shader.
+	WriteDescriptors write;
+	write.AddCombinedImageSampler(descriptorSet, 0, tex ? tex->imageView.get() : nulltex, tex ? sampler : plainSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	write.AddCombinedImageSampler(descriptorSet, 1, macrotex ? macrotex->imageView.get() : nulltex, plainSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	write.AddCombinedImageSampler(descriptorSet, 2, detailtex ? detailtex->imageView.get() : nulltex, plainSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	write.AddCombinedImageSampler(descriptorSet, 3, lightmap ? lightmap->imageView.get() : nulltex, plainSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	write.Execute(renderer->Device.get());
+
+	Textures.SceneSetCache[key] = descriptorSet;
+	return descriptorSet;
+}
+
+VulkanDescriptorSet* DescriptorSetManager::AllocSceneTextureSet()
+{
+	if (Textures.ScenePoolSetsLeft == 0)
+	{
+		Textures.ScenePools.push_back(DescriptorPoolBuilder()
+			.AddPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, SceneSetsPerPool * 4)
+			.MaxSets(SceneSetsPerPool)
+			.DebugName("SceneTexturePool")
+			.Create(renderer->Device.get()));
+		Textures.ScenePoolSetsLeft = SceneSetsPerPool;
+	}
+
+	Textures.SceneSets.push_back(Textures.ScenePools.back()->allocate(Textures.SceneLayout.get()));
+	Textures.ScenePoolSetsLeft--;
+	return Textures.SceneSets.back().get();
+}
+
 void DescriptorSetManager::UpdateBindlessSet()
 {
 	Textures.WriteBindless.Execute(renderer->Device.get());
@@ -92,6 +147,17 @@ void DescriptorSetManager::CreateBindlessTextureSet()
 		.Create(renderer->Device.get());
 
 	Textures.BindlessSet = Textures.BindlessPool->allocate(Textures.BindlessLayout.get(), MaxBindlessTextures);
+}
+
+void DescriptorSetManager::CreateSceneTextureLayout()
+{
+	Textures.SceneLayout = DescriptorSetLayoutBuilder()
+		.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
+		.AddBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
+		.AddBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
+		.AddBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
+		.DebugName("SceneTextureLayout")
+		.Create(renderer->Device.get());
 }
 
 void DescriptorSetManager::CreatePresentLayout()

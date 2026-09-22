@@ -20,7 +20,7 @@ void UploadManager::ClearCache()
 
 bool UploadManager::SupportsTextureFormat(TextureFormat Format) const
 {
-	return TextureUploader::GetUploader(Format);
+	return TextureUploader::GetUploader(Format, renderer->Device->PhysicalDevice.Device);
 }
 
 void UploadManager::UploadTexture(CachedTexture* tex, const TextureInfo& Info, bool masked)
@@ -29,7 +29,7 @@ void UploadManager::UploadTexture(CachedTexture* tex, const TextureInfo& Info, b
 	int height = Info.VSize;
 	int mipcount = Info.NumMips;
 
-	TextureUploader* uploader = TextureUploader::GetUploader(Info.Format);
+	TextureUploader* uploader = TextureUploader::GetUploader(Info.Format, renderer->Device->PhysicalDevice.Device);
 
 	if ((uint32_t)Info.USize > renderer->Device.get()->PhysicalDevice.Properties.Properties.limits.maxImageDimension2D ||
 		(uint32_t)Info.VSize > renderer->Device.get()->PhysicalDevice.Properties.Properties.limits.maxImageDimension2D ||
@@ -69,7 +69,7 @@ void UploadManager::UploadTexture(CachedTexture* tex, const TextureInfo& Info, b
 
 void UploadManager::UploadTextureRect(CachedTexture* tex, const TextureInfo& Info, int x, int y, int w, int h)
 {
-	TextureUploader* uploader = TextureUploader::GetUploader(Info.Format);
+	TextureUploader* uploader = TextureUploader::GetUploader(Info.Format, renderer->Device->PhysicalDevice.Device);
 	if (!uploader || Info.NumMips < 1 || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > Info.Mips[0].Width || y + h > Info.Mips[0].Height || Info.Mips[0].Data.empty())
 		return;
 

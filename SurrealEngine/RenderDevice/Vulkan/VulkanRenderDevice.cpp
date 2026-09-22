@@ -9,6 +9,7 @@
 #include <surrealgpu/vulkansurface.h>
 #include <surrealwidgets/core/widget.h>
 #include <cmath>
+#include <cstdlib>
 #include <stdexcept>
 
 VulkanRenderDevice::VulkanRenderDevice(Widget* InViewport)
@@ -31,18 +32,20 @@ VulkanRenderDevice::VulkanRenderDevice(Widget* InViewport)
 		deviceBuilder.OptionalDescriptorIndexing();
 		deviceBuilder.OptionalRayQuery();
 		deviceBuilder.Surface(surface);
-		deviceBuilder.RequireExtension(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
 		deviceBuilder.RequireExtension(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
 		deviceBuilder.SelectDevice(VkDeviceIndex);
 		Device = deviceBuilder.Create(surface->Instance);
 
-		bool supportsBindless =
+		// Descriptor indexing is missing on several mobile GPUs (PowerVR Rogue, for one).
+		// Without it the renderer falls back to a descriptor set per texture combination.
+		SupportsBindless =
 			Device->EnabledFeatures.DescriptorIndexing.descriptorBindingPartiallyBound &&
 			Device->EnabledFeatures.DescriptorIndexing.runtimeDescriptorArray &&
 			Device->EnabledFeatures.DescriptorIndexing.shaderSampledImageArrayNonUniformIndexing;
 
-		if (!supportsBindless)
-			throw std::runtime_error("VulkanDrv requires a GPU that supports bindless textures!");
+		// SURREAL_VK_NO_BINDLESS exercises that fallback on hardware that doesn't need it.
+		if (std::getenv("SURREAL_VK_NO_BINDLESS"))
+			SupportsBindless = false;
 
 		Commands.reset(new CommandBufferManager(this));
 		Samplers.reset(new SamplerManager(this));
@@ -73,6 +76,7 @@ VulkanRenderDevice::VulkanRenderDevice(Widget* InViewport)
 		LogMessage(std::string("Vulkan device: ") + props.deviceName);
 		LogMessage("Vulkan device type: " + deviceType);
 		LogMessage("Vulkan version: " + apiVersion + " (api) " + driverVersion + " (driver)");
+		LogMessage(std::string("Vulkan textures: ") + (SupportsBindless ? "bindless" : "per-batch descriptor sets (no descriptor indexing)"));
 	}
 	catch (const std::exception& e)
 	{
@@ -110,7 +114,8 @@ void VulkanError(const char* text)
 
 void VulkanRenderDevice::SubmitAndWait(bool present, int presentWidth, int presentHeight, bool presentFullscreen)
 {
-	DescriptorSets->UpdateBindlessSet();
+	if (SupportsBindless)
+		DescriptorSets->UpdateBindlessSet();
 
 	Commands->SubmitCommands(present, presentWidth, presentHeight, presentFullscreen);
 
@@ -274,6 +279,7 @@ void VulkanRenderDevice::Unlock(bool Blit)
 	SubmitAndWait(Blit ? true : false, windowWidth, windowHeight, Viewport->IsFullscreen());
 
 	Batch.Pipeline = nullptr;
+	Batch.DescriptorSet = nullptr;
 
 	if (Samplers->LODBias != LODBias)
 	{
@@ -348,9 +354,9 @@ void VulkanRenderDevice::DrawBatch(VulkanCommandBuffer* cmdbuffer)
 			cmdbuffer->setViewport(0, 1, &viewportdesc);
 		}
 
-		auto layout = RenderPasses->Scene.BindlessPipelineLayout.get();
+		auto layout = RenderPasses->Scene.PipelineLayout.get();
 		cmdbuffer->bindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, Batch.Pipeline->Pipeline.get());
-		cmdbuffer->bindDescriptorSet(VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, DescriptorSets->GetBindlessSet());
+		cmdbuffer->bindDescriptorSet(VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, Batch.DescriptorSet);
 		cmdbuffer->pushConstants(layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ScenePushConstants), &pushconstants);
 		cmdbuffer->setBlendConstants(Batch.BlendConstants);
 		cmdbuffer->drawIndexed((uint32_t)icount, 1, (uint32_t)Batch.SceneIndexStart, 0, 0);
@@ -927,7 +933,6 @@ void VulkanRenderDevice::EndFlash()
 	{
 		vec4 color(FlashFog.x, FlashFog.y, FlashFog.z, 1.0f - std::min(FlashScale.x * 2.0f, 1.0f));
 		vec2 zero2(0.0f);
-		ivec4 zero4(0);
 
 		DrawBatch(Commands->GetDrawCommands());
 		pushconstants.objectToProjection = mat4::identity();
@@ -935,6 +940,9 @@ void VulkanRenderDevice::EndFlash()
 		pushconstants.nearClip = vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
 		SetPipeline(RenderPasses->GetEndFlashPipeline());
+
+		// Nothing is sampled here, but a set still has to be bound for the batch.
+		ivec4 zero4 = GetTextureIndexes(PF_Highlighted, nullptr);
 
 		auto alloc = ReserveVertices(4, 6);
 		if (alloc.vptr)
@@ -1002,6 +1010,7 @@ void VulkanRenderDevice::PrecacheTexture(TextureInfo& Info, uint32_t PolyFlags)
 
 void VulkanRenderDevice::ClearTextureCache()
 {
+	Batch.DescriptorSet = nullptr;
 	DescriptorSets->ClearCache();
 	Textures->ClearCache();
 	Uploads->ClearCache();

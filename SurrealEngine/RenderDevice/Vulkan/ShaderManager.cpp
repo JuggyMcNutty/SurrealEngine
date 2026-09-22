@@ -9,19 +9,25 @@ ShaderManager::ShaderManager(VulkanRenderDevice* renderer) : renderer(renderer)
 {
 	GLSLCompiler::Init();
 
+	// Without descriptor indexing the scene shaders sample four bound samplers
+	// instead of indexing one unbounded array.
+	std::string sceneDefines = renderer->SupportsBindless ?
+		"#extension GL_EXT_nonuniform_qualifier : enable\r\n#define BINDLESS_TEXTURES\r\n" :
+		std::string();
+
 	Scene.VertexShader = GLSLCompiler()
 		.Type(ShaderType::Vertex)
-		.AddSource("shaders/Scene.vert", LoadShaderCode("shaders/Scene.vert", "#extension GL_EXT_nonuniform_qualifier : enable\r\n"))
+		.AddSource("shaders/Scene.vert", LoadShaderCode("shaders/Scene.vert", sceneDefines))
 		.Compile(renderer->Device.get());
 
 	Scene.FragmentShader = GLSLCompiler()
 		.Type(ShaderType::Fragment)
-		.AddSource("shaders/Scene.frag", LoadShaderCode("shaders/Scene.frag", "#extension GL_EXT_nonuniform_qualifier : enable\r\n#"))
+		.AddSource("shaders/Scene.frag", LoadShaderCode("shaders/Scene.frag", sceneDefines))
 		.Compile(renderer->Device.get());
 
 	Scene.FragmentShaderAlphaTest = GLSLCompiler()
 		.Type(ShaderType::Fragment)
-		.AddSource("shaders/Scene.frag", LoadShaderCode("shaders/Scene.frag", "#extension GL_EXT_nonuniform_qualifier : enable\r\n#define ALPHATEST"))
+		.AddSource("shaders/Scene.frag", LoadShaderCode("shaders/Scene.frag", sceneDefines + "#define ALPHATEST\r\n"))
 		.Compile(renderer->Device.get());
 
 	Postprocess.VertexShader = GLSLCompiler()

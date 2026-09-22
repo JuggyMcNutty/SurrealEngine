@@ -34,7 +34,7 @@ public:
 
 	struct
 	{
-		std::unique_ptr<VulkanPipelineLayout> BindlessPipelineLayout;
+		std::unique_ptr<VulkanPipelineLayout> PipelineLayout;
 		std::unique_ptr<VulkanRenderPass> RenderPass;
 		std::unique_ptr<VulkanRenderPass> RenderPassContinue;
 		PipelineState Pipeline[33];
@@ -67,7 +67,7 @@ public:
 	} Postprocess;
 
 private:
-	void CreateSceneBindlessPipelineLayout();
+	void CreateScenePipelineLayout();
 	void CreatePresentPipelineLayout();
 	void CreateBloomPipelineLayout();
 

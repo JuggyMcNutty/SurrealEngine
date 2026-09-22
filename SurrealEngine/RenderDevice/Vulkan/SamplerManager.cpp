@@ -1,5 +1,4 @@
 
-#include "Precomp.h"
 #include "SamplerManager.h"
 #include "VulkanRenderDevice.h"
 #include <surrealgpu/vulkanbuilders.h>
@@ -35,7 +34,7 @@ void SamplerManager::CreateSceneSamplers()
 		builder.Anisotropy(8.0f);
 		builder.MipLodBias(renderer->LODBias);
 
-		if (i & 1)
+		if ((i & 1) != 0)
 		{
 			builder.MinFilter(VK_FILTER_NEAREST);
 			builder.MagFilter(VK_FILTER_NEAREST);
@@ -48,7 +47,7 @@ void SamplerManager::CreateSceneSamplers()
 			builder.MipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR);
 		}
 
-		if (i & 2)
+		if ((i & 2) != 0)
 		{
 			builder.AddressMode(VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE);
 		}

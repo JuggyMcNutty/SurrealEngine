@@ -47,6 +47,10 @@ public:
 
 	std::shared_ptr<VulkanDevice> Device;
 
+	// False on GPUs without descriptor indexing. The renderer then binds one
+	// descriptor set per texture combination instead of indexing a texture array.
+	bool SupportsBindless = false;
+
 	std::unique_ptr<CommandBufferManager> Commands;
 
 	std::unique_ptr<SamplerManager> Samplers;
@@ -138,6 +142,8 @@ private:
 	bool IsLocked = false;
 
 	void SetPipeline(PipelineState* pipeline);
+	void SetTextureSet(VulkanDescriptorSet* descriptorSet);
+	VulkanDescriptorSet* GetTextureSet(uint32_t PolyFlags, CachedTexture* tex, CachedTexture* lightmap, CachedTexture* macrotex, CachedTexture* detailtex, bool clamp);
 	ivec4 GetTextureIndexes(uint32_t PolyFlags, CachedTexture* tex, bool clamp = false);
 	ivec4 GetTextureIndexes(uint32_t PolyFlags, CachedTexture* tex, CachedTexture* lightmap, CachedTexture* macrotex, CachedTexture* detailtex);
 	void DrawBatch(VulkanCommandBuffer* cmdbuffer);
@@ -149,6 +155,7 @@ private:
 	{
 		size_t SceneIndexStart = 0;
 		PipelineState* Pipeline = nullptr;
+		VulkanDescriptorSet* DescriptorSet = nullptr;
 		float BlendConstants[4] = {};
 	} Batch;
 
@@ -182,19 +189,55 @@ inline void VulkanRenderDevice::SetPipeline(PipelineState* pipeline)
 	}
 }
 
+inline void VulkanRenderDevice::SetTextureSet(VulkanDescriptorSet* descriptorSet)
+{
+	if (descriptorSet != Batch.DescriptorSet)
+	{
+		DrawBatch(Commands->GetDrawCommands());
+		Batch.DescriptorSet = descriptorSet;
+	}
+}
+
+inline VulkanDescriptorSet* VulkanRenderDevice::GetTextureSet(uint32_t PolyFlags, CachedTexture* tex, CachedTexture* lightmap, CachedTexture* macrotex, CachedTexture* detailtex, bool clamp)
+{
+	if (DescriptorSets->IsTextureSetCacheFull())
+	{
+		// Dropping the cache frees sets the pending commands still reference, so drain first.
+		FlushDrawBatchAndWait();
+		DescriptorSets->ClearCache();
+		Batch.DescriptorSet = nullptr;
+	}
+	return DescriptorSets->GetTextureSet(PolyFlags, tex, lightmap, macrotex, detailtex, clamp);
+}
+
 inline ivec4 VulkanRenderDevice::GetTextureIndexes(uint32_t PolyFlags, CachedTexture* tex, bool clamp)
 {
+	if (!SupportsBindless)
+	{
+		SetTextureSet(GetTextureSet(PolyFlags, tex, nullptr, nullptr, nullptr, clamp));
+		return ivec4(0);
+	}
+
+	Batch.DescriptorSet = DescriptorSets->GetBindlessSet();
 	return ivec4(DescriptorSets->GetTextureArrayIndex(PolyFlags, tex, clamp), 0, 0, 0);
 }
 
 inline ivec4 VulkanRenderDevice::GetTextureIndexes(uint32_t PolyFlags, CachedTexture* tex, CachedTexture* lightmap, CachedTexture* macrotex, CachedTexture* detailtex)
 {
+	if (!SupportsBindless)
+	{
+		SetTextureSet(GetTextureSet(PolyFlags, tex, lightmap, macrotex, detailtex, false));
+		return ivec4(0);
+	}
+
 	if (DescriptorSets->IsTextureArrayFull())
 	{
 		FlushDrawBatchAndWait();
 		DescriptorSets->ClearCache();
 		Textures->ClearAllBindlessIndexes();
 	}
+
+	Batch.DescriptorSet = DescriptorSets->GetBindlessSet();
 
 	ivec4 textureBinds;
 	textureBinds.x = DescriptorSets->GetTextureArrayIndex(PolyFlags, tex);

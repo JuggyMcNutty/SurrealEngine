@@ -1,14 +1,13 @@
 
 #include "Precomp.h"
 #include "TextureUploader.h"
-#include "Packages/Engine/Resources/Textures/UTexture.h"
 #include "RenderDevice/RenderDevice.h"
 
 #ifdef USE_SSE2
 #include <immintrin.h>
 #endif
 
-TextureUploader* TextureUploader::GetUploader(TextureFormat format)
+TextureUploader* TextureUploader::GetUploader(TextureFormat format, VkPhysicalDevice physicalDevice)
 {
 	static std::map<TextureFormat, std::unique_ptr<TextureUploader>> Uploaders;
 	if (Uploaders.empty())
@@ -172,7 +171,40 @@ TextureUploader* TextureUploader::GetUploader(TextureFormat format)
 
 	auto it = Uploaders.find(format);
 	if (it != Uploaders.end())
-		return it->second.get();
+	{
+		if (physicalDevice == VK_NULL_HANDLE || !it->second)
+			return it->second.get();
+
+		// The canonical format exists, but the GPU may not be able to sample it.
+		// Desktop BCn formats and RGB8 are optional in Vulkan and missing on
+		// several mobile GPUs (the PowerVR Rogue GE8300, for one). Sampling an
+		// unsupported format is undefined behavior and produces garbage, so
+		// substitute a CPU decoder writing a format the device does support.
+		// A format that samples but cannot be linearly filtered is just as broken
+		// with the engine's linear samplers, so it falls back the same way (the
+		// GE8300 samples RGBA32F but cannot filter it, which turns every lightmap
+		// and fog map into speckle).
+		VkFormatProperties props = {};
+		vkGetPhysicalDeviceFormatProperties(physicalDevice, it->second->GetVkFormat(), &props);
+		if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) &&
+			(props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT))
+			return it->second.get();
+
+		static std::map<TextureFormat, std::unique_ptr<TextureUploader>> Decoders;
+		if (Decoders.empty())
+		{
+			Decoders[TextureFormat::BC1].reset(new TextureUploader_BC1_Decode());
+			Decoders[TextureFormat::BC1_PA].reset(new TextureUploader_BC1_Decode());
+			Decoders[TextureFormat::BC2].reset(new TextureUploader_BC2_Decode());
+			Decoders[TextureFormat::BC3].reset(new TextureUploader_BC3_Decode());
+			Decoders[TextureFormat::BC4].reset(new TextureUploader_BC4_Decode());
+			Decoders[TextureFormat::BC5].reset(new TextureUploader_BC5_Decode());
+			Decoders[TextureFormat::RGB8].reset(new TextureUploader_RGB8_Decode());
+			Decoders[TextureFormat::RGBA32_F].reset(new TextureUploader_RGBA32F_Decode());
+		}
+		auto dec = Decoders.find(format);
+		return dec != Decoders.end() ? dec->second.get() : nullptr;
+	}
 	else
 		return nullptr;
 }
@@ -469,5 +501,269 @@ void TextureUploader_2DBlock::UploadRect(void* d, UnrealMipmap* mip, int x, int 
 		memcpy(dst, src, size);
 		dst += size;
 		src += pitch;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+// CPU decoders for GPUs that cannot sample a format natively. Each writes a
+// simple unpacked format instead of the block compressed one.
+
+static void DecodeAlphaBlock(const uint8_t* src, uint8_t out[16])
+{
+	uint8_t a0 = src[0];
+	uint8_t a1 = src[1];
+	uint8_t p[8];
+	p[0] = a0;
+	p[1] = a1;
+	if (a0 > a1)
+	{
+		p[2] = (uint8_t)((6 * a0 + a1) / 7);
+		p[3] = (uint8_t)((5 * a0 + 2 * a1) / 7);
+		p[4] = (uint8_t)((4 * a0 + 3 * a1) / 7);
+		p[5] = (uint8_t)((3 * a0 + 4 * a1) / 7);
+		p[6] = (uint8_t)((2 * a0 + 5 * a1) / 7);
+		p[7] = (uint8_t)((a0 + 6 * a1) / 7);
+	}
+	else
+	{
+		p[2] = (uint8_t)((4 * a0 + a1) / 5);
+		p[3] = (uint8_t)((3 * a0 + 2 * a1) / 5);
+		p[4] = (uint8_t)((2 * a0 + 3 * a1) / 5);
+		p[5] = (uint8_t)((a0 + 4 * a1) / 5);
+		p[6] = 0;
+		p[7] = 255;
+	}
+	uint64_t idx = 0;
+	for (int i = 0; i < 6; i++)
+		idx |= (uint64_t)src[2 + i] << (8 * i);
+	for (int i = 0; i < 16; i++)
+		out[i] = p[(idx >> (3 * i)) & 7];
+}
+
+static void DecodeColorBlock(const uint8_t* src, uint8_t* dst, int dstWidth, bool oneBitAlpha)
+{
+	uint16_t c0 = src[0] | (src[1] << 8);
+	uint16_t c1 = src[2] | (src[3] << 8);
+	uint32_t idx = src[4] | (src[5] << 8) | (src[6] << 16) | ((uint32_t)src[7] << 24);
+
+	uint8_t r[4], g[4], b[4], a[4];
+	r[0] = (uint8_t)(((c0 >> 11) << 3) | ((c0 >> 11) >> 2));
+	g[0] = (uint8_t)((((c0 >> 5) & 63) << 2) | (((c0 >> 5) & 63) >> 4));
+	b[0] = (uint8_t)(((c0 & 31) << 3) | ((c0 & 31) >> 2));
+	r[1] = (uint8_t)(((c1 >> 11) << 3) | ((c1 >> 11) >> 2));
+	g[1] = (uint8_t)((((c1 >> 5) & 63) << 2) | (((c1 >> 5) & 63) >> 4));
+	b[1] = (uint8_t)(((c1 & 31) << 3) | ((c1 & 31) >> 2));
+
+	if (oneBitAlpha && c0 <= c1)
+	{
+		// DXTC1 transparency: index 3 is a fully transparent texel.
+		r[2] = (uint8_t)((r[0] + r[1]) / 2);
+		g[2] = (uint8_t)((g[0] + g[1]) / 2);
+		b[2] = (uint8_t)((b[0] + b[1]) / 2);
+		a[2] = 255;
+		r[3] = g[3] = b[3] = 0;
+		a[3] = 0;
+	}
+	else
+	{
+		r[2] = (uint8_t)((2 * r[0] + r[1]) / 3);
+		g[2] = (uint8_t)((2 * g[0] + g[1]) / 3);
+		b[2] = (uint8_t)((2 * b[0] + b[1]) / 3);
+		r[3] = (uint8_t)((r[0] + 2 * r[1]) / 3);
+		g[3] = (uint8_t)((g[0] + 2 * g[1]) / 3);
+		b[3] = (uint8_t)((b[0] + 2 * b[1]) / 3);
+		a[2] = a[3] = 255;
+	}
+	a[0] = a[1] = 255;
+
+	for (int i = 0; i < 16; i++)
+	{
+		int t = (idx >> (2 * i)) & 3;
+		dst[i * 4 + 0] = r[t];
+		dst[i * 4 + 1] = g[t];
+		dst[i * 4 + 2] = b[t];
+		dst[i * 4 + 3] = a[t];
+	}
+}
+
+// Decode a block compressed mip range into dst (texels, row pitch w * dstbytes).
+// x and y must be block aligned. outTexels gets one decoded texel per pixel.
+template<int DstBytes, typename BlockToTexels>
+static void UploadDecoded(void* d, UnrealMipmap* mip, int x, int y, int w, int h, int blockBytes, int blockX, int blockY, BlockToTexels blockToTexels)
+{
+	int bx0 = x / blockX;
+	int by0 = y / blockY;
+	int bx1 = (x + w + blockX - 1) / blockX;
+	int by1 = (y + h + blockY - 1) / blockY;
+	int blockCols = (mip->Width + blockX - 1) / blockX;
+	int pitch = blockCols * blockBytes;
+	uint8_t* dst = (uint8_t*)d;
+	for (int by = by0; by < by1; by++)
+	{
+		for (int bx = bx0; bx < bx1; bx++)
+		{
+			const uint8_t* block = mip->Data.data() + ((size_t)by * blockCols + bx) * blockBytes;
+			uint8_t texels[16 * 4]; // up to 4x4 RGBA8
+			blockToTexels(block, texels);
+			for (int ty = 0; ty < blockY; ty++)
+			{
+				int gy = by * blockY + ty - y;
+				if (gy < 0 || gy >= h) continue;
+				for (int tx = 0; tx < blockX; tx++)
+				{
+					int gx = bx * blockX + tx - x;
+					if (gx < 0 || gx >= w) continue;
+					memcpy(dst + ((size_t)gy * w + gx) * DstBytes, texels + ((size_t)ty * blockX + tx) * DstBytes, DstBytes);
+				}
+			}
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+int TextureUploader_BC1_Decode::GetUploadSize(int x, int y, int w, int h)
+{
+	return w * h * 4;
+}
+
+void TextureUploader_BC1_Decode::UploadRect(void* d, UnrealMipmap* mip, int x, int y, int w, int h, TextureColor* palette, bool masked)
+{
+	UploadDecoded<4>(d, mip, x, y, w, h, 8, 4, 4, [](const uint8_t* block, uint8_t* texels) {
+		DecodeColorBlock(block, texels, 4, true);
+	});
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+int TextureUploader_BC2_Decode::GetUploadSize(int x, int y, int w, int h)
+{
+	return w * h * 4;
+}
+
+void TextureUploader_BC2_Decode::UploadRect(void* d, UnrealMipmap* mip, int x, int y, int w, int h, TextureColor* palette, bool masked)
+{
+	UploadDecoded<4>(d, mip, x, y, w, h, 16, 4, 4, [](const uint8_t* block, uint8_t* texels)
+	{
+		DecodeColorBlock(block + 8, texels, 4, false);
+		// The first eight bytes hold four alpha bits per texel, low nibble first.
+		for (int i = 0; i < 16; i++)
+		{
+			uint8_t bits = block[i / 2];
+			texels[i * 4 + 3] = (i & 1) ? (bits >> 4) : (bits & 15);
+			texels[i * 4 + 3] = (uint8_t)((texels[i * 4 + 3] << 4) | texels[i * 4 + 3]);
+		}
+	});
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+int TextureUploader_BC3_Decode::GetUploadSize(int x, int y, int w, int h)
+{
+	return w * h * 4;
+}
+
+void TextureUploader_BC3_Decode::UploadRect(void* d, UnrealMipmap* mip, int x, int y, int w, int h, TextureColor* palette, bool masked)
+{
+	UploadDecoded<4>(d, mip, x, y, w, h, 16, 4, 4, [](const uint8_t* block, uint8_t* texels)
+	{
+		DecodeColorBlock(block + 8, texels, 4, false);
+		uint8_t alpha[16];
+		DecodeAlphaBlock(block, alpha);
+		for (int i = 0; i < 16; i++)
+			texels[i * 4 + 3] = alpha[i];
+	});
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+int TextureUploader_BC4_Decode::GetUploadSize(int x, int y, int w, int h)
+{
+	return w * h;
+}
+
+void TextureUploader_BC4_Decode::UploadRect(void* d, UnrealMipmap* mip, int x, int y, int w, int h, TextureColor* palette, bool masked)
+{
+	UploadDecoded<1>(d, mip, x, y, w, h, 8, 4, 4, [](const uint8_t* block, uint8_t* texels)
+	{
+		DecodeAlphaBlock(block, texels);
+	});
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+int TextureUploader_BC5_Decode::GetUploadSize(int x, int y, int w, int h)
+{
+	return w * h * 2;
+}
+
+void TextureUploader_BC5_Decode::UploadRect(void* d, UnrealMipmap* mip, int x, int y, int w, int h, TextureColor* palette, bool masked)
+{
+	UploadDecoded<2>(d, mip, x, y, w, h, 16, 4, 4, [](const uint8_t* block, uint8_t* texels)
+	{
+		uint8_t r[16], g[16];
+		DecodeAlphaBlock(block, r);
+		DecodeAlphaBlock(block + 8, g);
+		for (int i = 0; i < 16; i++)
+		{
+			texels[i * 2 + 0] = r[i];
+			texels[i * 2 + 1] = g[i];
+		}
+	});
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+int TextureUploader_RGB8_Decode::GetUploadSize(int x, int y, int w, int h)
+{
+	return w * h * 4;
+}
+
+void TextureUploader_RGB8_Decode::UploadRect(void* d, UnrealMipmap* mip, int x, int y, int w, int h, TextureColor* palette, bool masked)
+{
+	int pitch = mip->Width * 3;
+	uint8_t* src = mip->Data.data() + (size_t)x * 3 + (size_t)y * pitch;
+	uint8_t* dst = (uint8_t*)d;
+	for (int i = 0; i < h; i++)
+	{
+		for (int j = 0; j < w; j++)
+		{
+			dst[j * 4 + 0] = src[j * 3 + 0];
+			dst[j * 4 + 1] = src[j * 3 + 1];
+			dst[j * 4 + 2] = src[j * 3 + 2];
+			dst[j * 4 + 3] = 255;
+		}
+		dst += (size_t)w * 4;
+		src += pitch;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+int TextureUploader_RGBA32F_Decode::GetUploadSize(int x, int y, int w, int h)
+{
+	return w * h * 4;
+}
+
+void TextureUploader_RGBA32F_Decode::UploadRect(void* d, UnrealMipmap* mip, int x, int y, int w, int h, TextureColor* palette, bool masked)
+{
+	int pitch = mip->Width * 16;
+	float* src = (float*)(mip->Data.data() + (size_t)x * 16 + (size_t)y * pitch);
+	uint8_t* dst = (uint8_t*)d;
+	for (int i = 0; i < h; i++)
+	{
+		for (int j = 0; j < w; j++)
+		{
+			const float* c = src + (size_t)j * 4;
+			for (int ch = 0; ch < 4; ch++)
+			{
+				float v = c[ch];
+				v = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+				dst[j * 4 + ch] = (uint8_t)(v * 255.0f + 0.5f);
+			}
+		}
+		dst += (size_t)w * 4;
+		src = (float*)((uint8_t*)src + pitch);
 	}
 }
