@@ -1165,20 +1165,37 @@ endfunction()
 
 function( add_zip ZIP_NAME ZIP_DIR )
 
+	# zipdir runs on the BUILD machine to pack the resource zip, so when
+	# cross-compiling the in-tree target is the wrong architecture and cannot be
+	# executed. Point ZIPDIR_EXECUTABLE at a host-built one in that case.
+	if (ZIPDIR_EXECUTABLE)
+		set(ZIPDIR_COMMAND "${ZIPDIR_EXECUTABLE}")
+		set(ZIPDIR_DEPENDS "")
+	else()
+		set(ZIPDIR_COMMAND zipdir)
+		set(ZIPDIR_DEPENDS zipdir)
+	endif()
+
 	# Add command for building the zip file
 	add_custom_command( OUTPUT ${CMAKE_BINARY_DIR}/${ZIP_NAME}
-		COMMAND zipdir ${CMAKE_BINARY_DIR}/${ZIP_NAME} ${ZIP_DIR}
-		DEPENDS zipdir )
+		COMMAND ${ZIPDIR_COMMAND} ${CMAKE_BINARY_DIR}/${ZIP_NAME} ${ZIP_DIR}
+		DEPENDS ${ZIPDIR_DEPENDS} )
 
 	# Find the files in the directory
 	file(GLOB_RECURSE ZIP_SRCS ${ZIP_DIR}/*)
 
 	# Create target project for the zip file
 	# Touch zipdir executable to force rebuild of the zip file if any of the resource files change
-	add_custom_target( Resources ALL
-		COMMAND ${CMAKE_COMMAND} -E touch $<TARGET_FILE:zipdir>
-		DEPENDS ${CMAKE_BINARY_DIR}/${ZIP_NAME}
-		SOURCES ${ZIP_SRCS})
+	if (ZIPDIR_EXECUTABLE)
+		add_custom_target( Resources ALL
+			DEPENDS ${CMAKE_BINARY_DIR}/${ZIP_NAME}
+			SOURCES ${ZIP_SRCS})
+	else()
+		add_custom_target( Resources ALL
+			COMMAND ${CMAKE_COMMAND} -E touch $<TARGET_FILE:zipdir>
+			DEPENDS ${CMAKE_BINARY_DIR}/${ZIP_NAME}
+			SOURCES ${ZIP_SRCS})
+	endif()
 
 	# Create IDE source gorups
 	create_zip_source_groups("Source Files" ${ZIP_DIR})
@@ -1206,11 +1223,13 @@ set(ZIPDIR_SOURCES
 	Thirdparty/miniz/miniz.h
 )
 
-add_executable(zipdir ${ZIPDIR_SOURCES})
-set_target_properties(zipdir PROPERTIES CXX_STANDARD 20)
-set_target_properties(zipdir PROPERTIES C_STANDARD 17)
-if (APPLE)
-target_link_libraries(zipdir "-framework CoreFoundation")
+if (NOT ZIPDIR_EXECUTABLE)
+	add_executable(zipdir ${ZIPDIR_SOURCES})
+	set_target_properties(zipdir PROPERTIES CXX_STANDARD 20)
+	set_target_properties(zipdir PROPERTIES C_STANDARD 17)
+	if (APPLE)
+		target_link_libraries(zipdir "-framework CoreFoundation")
+	endif()
 endif()
 
 add_zip(SurrealEngine.pk3 ${CMAKE_CURRENT_SOURCE_DIR}/Resources)

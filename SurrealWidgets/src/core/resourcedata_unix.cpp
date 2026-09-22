@@ -4,8 +4,13 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#ifdef SURREALWIDGETS_DESKTOP_FONTS
 #include <gio/gio.h>
 #include <fontconfig/fontconfig.h>
+#else
+#include <cstdlib>
+#include <sys/stat.h>
+#endif
 
 static std::vector<uint8_t> ReadAllBytes(const std::string& filename)
 {
@@ -22,6 +27,8 @@ static std::vector<uint8_t> ReadAllBytes(const std::string& filename)
 
 	return buffer;
 }
+
+#ifdef SURREALWIDGETS_DESKTOP_FONTS
 
 static std::vector<SingleFontData> GetGtkUIFont(const std::string& propertyName)
 {
@@ -64,6 +71,47 @@ static std::vector<SingleFontData> GetGtkUIFont(const std::string& propertyName)
 	fontdata.fontdata = ReadAllBytes(filename);
 	return { std::move(fontdata) };
 }
+
+#else
+
+// No desktop session to ask. An embedded target has no GSettings schema and no
+// fontconfig configuration, so the UI font is whatever the device actually
+// ships. Overridable so a packager does not have to patch this list.
+static std::vector<SingleFontData> GetGtkUIFont(const std::string& propertyName)
+{
+	const bool monospace = (propertyName.find("monospace") != std::string::npos);
+
+	const char* envName = monospace ? "SURREALWIDGETS_MONOSPACE_FONT" : "SURREALWIDGETS_FONT";
+	const char* override = std::getenv(envName);
+
+	std::vector<std::string> candidates;
+	if (override && *override)
+		candidates.push_back(override);
+
+	// TrimUI / spruceOS
+	candidates.push_back("/usr/trimui/res/regular.ttf");
+	candidates.push_back("/usr/trimui/res/full.ttf");
+	candidates.push_back("/mnt/SDCARD/spruce/Font Files/Noto.ttf");
+	// Ordinary Linux installs, so a desktop build without glib still works
+	candidates.push_back("/usr/share/fonts/TTF/DejaVuSans.ttf");
+	candidates.push_back("/usr/share/fonts/dejavu/DejaVuSans.ttf");
+	candidates.push_back("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+	candidates.push_back("/usr/share/fonts/noto/NotoSans-Regular.ttf");
+
+	for (const std::string& path : candidates)
+	{
+		struct stat st;
+		if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+		{
+			SingleFontData fontdata;
+			fontdata.fontdata = ReadAllBytes(path);
+			return { std::move(fontdata) };
+		}
+	}
+	throw std::runtime_error("No usable UI font found; set " + std::string(envName));
+}
+
+#endif
 
 std::vector<SingleFontData> ResourceData::LoadSystemFont()
 {

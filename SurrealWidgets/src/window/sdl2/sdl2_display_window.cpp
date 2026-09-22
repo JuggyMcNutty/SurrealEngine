@@ -3,6 +3,8 @@
 #include <vector>
 #include <string>
 #include <SDL2/SDL_vulkan.h>
+#include <cstring>
+#include <cmath>
 
 Uint32 SDL2DisplayWindow::PaintEventNumber = 0xffffffff;
 bool SDL2DisplayWindow::ExitRunLoop;

@@ -4,6 +4,7 @@
 #include <SDL2/SDL_video.h>
 #ifndef WIN32
 #include <dlfcn.h>
+#include <cstring>
 #endif
 
 namespace X11DPI

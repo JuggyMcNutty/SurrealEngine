@@ -12,22 +12,35 @@ else()
 	option(ENABLE_SDL2 "Enable SDL2 backend. Optional on all platforms" ON)
 endif()
 
+# An embedded target (a handheld running a vendor SDL2 over EGL/Vulkan) has no
+# X11, no Wayland compositor, no dbus and no desktop GL. Turning those backends
+# off lets the library build against such a sysroot; window.cpp already has
+# null-returning stubs for every backend whose USE_* define is absent.
+option(ENABLE_X11 "Enable the X11 display backend" ON)
+option(ENABLE_WAYLAND "Enable the Wayland display backend" ON)
+
 if (UNIX AND NOT APPLE)
 	include(FindPkgConfig)
-	pkg_check_modules(DBUS dbus-1)
-	if (!DBUS_FOUND)
-		pkg_check_modules(DBUS REQUIRED dbus) # Fedora Linux looks for dbus instead
+	if (ENABLE_X11 OR ENABLE_WAYLAND)
+		pkg_check_modules(DBUS dbus-1)
+		if (NOT DBUS_FOUND)
+			pkg_check_modules(DBUS dbus) # Fedora Linux looks for dbus instead
+		endif()
+		# EGL is how the X11 and Wayland backends get a GL context. Not required:
+		# an SDL2-only build never asks for one.
+		find_package(OpenGL COMPONENTS EGL)
 	endif()
-	find_package(OpenGL REQUIRED COMPONENTS EGL)
-	pkg_check_modules(WAYLANDPP
-		wayland-client
-		wayland-client++
-		wayland-client-extra++
-		wayland-client-unstable++
-		wayland-cursor++
-		wayland-egl++
-		xkbcommon>=0.5.0
-	)
+	if (ENABLE_WAYLAND)
+		pkg_check_modules(WAYLANDPP
+			wayland-client
+			wayland-client++
+			wayland-client-extra++
+			wayland-client-unstable++
+			wayland-cursor++
+			wayland-egl++
+			xkbcommon>=0.5.0
+		)
+	endif()
 	pkg_check_modules(GLIB glib-2.0)
 	pkg_check_modules(FONTCONFIG fontconfig)
 endif()
@@ -363,10 +376,14 @@ elseif(HAIKU)
 	set(SURREALWIDGETS_LINK_OPTIONS -pthread)
 else()
 	set(SURREALWIDGETS_SOURCES ${SURREALWIDGETS_SOURCES} ${SURREALWIDGETS_UNIX_SOURCES})
-	set(SURREALWIDGETS_SOURCES ${SURREALWIDGETS_SOURCES} ${SURREALWIDGETS_X11_SOURCES})
-	set(SURREALWIDGETS_LIBS ${CMAKE_DL_LIBS} -lX11 -lXi)
-	set(SURREALWIDGETS_DEFINES -DUNIX -D_UNIX -DUSE_X11)
+	set(SURREALWIDGETS_LIBS ${CMAKE_DL_LIBS})
+	set(SURREALWIDGETS_DEFINES -DUNIX -D_UNIX)
 	set(SURREALWIDGETS_LINK_OPTIONS -pthread)
+	if (ENABLE_X11)
+		set(SURREALWIDGETS_SOURCES ${SURREALWIDGETS_SOURCES} ${SURREALWIDGETS_X11_SOURCES})
+		set(SURREALWIDGETS_LIBS ${SURREALWIDGETS_LIBS} -lX11 -lXi)
+		set(SURREALWIDGETS_DEFINES ${SURREALWIDGETS_DEFINES} -DUSE_X11)
+	endif()
 	if (DBUS_FOUND)
 		include_directories("/usr/lib64/dbus-1.0/include") # Bazzite (and probably Fedora 42) keeps the platform-specific dbus headers in this folder
 		set(SURREALWIDGETS_SOURCES ${SURREALWIDGETS_SOURCES} ${SURREALWIDGETS_DBUS_SOURCES})
@@ -385,11 +402,14 @@ else()
 		set(SURREALWIDGETS_DEFINES ${SURREALWIDGETS_DEFINES} -DUSE_WAYLAND)
 	endif()
 
-	set(SURREALWIDGETS_INCLUDE_DIRS ${SURREALWIDGETS_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
-	set(SURREALWIDGETS_LIBS ${SURREALWIDGETS_LIBS} ${GLIB_LDFLAGS} -lgio-2.0)
-
-	set(SURREALWIDGETS_INCLUDE_DIRS ${SURREALWIDGETS_INCLUDE_DIRS} ${FONTCONFIG_INCLUDE_DIRS})
-	set(SURREALWIDGETS_LIBS ${SURREALWIDGETS_LIBS} ${FONTCONFIG_LDFLAGS})
+	# The system-font lookup asks GSettings what the desktop UI font is and
+	# resolves it with fontconfig. With neither available, resourcedata_unix.cpp
+	# falls back to the fonts the device actually ships.
+	if (GLIB_FOUND AND FONTCONFIG_FOUND)
+		set(SURREALWIDGETS_INCLUDE_DIRS ${SURREALWIDGETS_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS} ${FONTCONFIG_INCLUDE_DIRS})
+		set(SURREALWIDGETS_LIBS ${SURREALWIDGETS_LIBS} ${GLIB_LDFLAGS} -lgio-2.0 ${FONTCONFIG_LDFLAGS})
+		set(SURREALWIDGETS_DEFINES ${SURREALWIDGETS_DEFINES} -DSURREALWIDGETS_DESKTOP_FONTS)
+	endif()
 endif()
 
 if(SDL3_FOUND)
@@ -420,10 +440,17 @@ if(APPLE)
 else()
 	target_link_libraries(surrealwidgets PRIVATE ${SURREALWIDGETS_LIBS})
 endif()
+# SDL can arrive either from find_package (which defines the imported target
+# and SDLn_LIBRARY) or from pkg-config (which defines SDLn_LIBRARIES instead).
+# Cross builds take the pkg-config path, where SDLn_LIBRARY is empty -- so try
+# all three rather than only the first two.
 if(SDL3_FOUND)
 	target_include_directories(surrealwidgets PRIVATE ${SDL3_INCLUDE_DIRS})
 	if(TARGET SDL3::SDL3)
 		target_link_libraries(surrealwidgets PRIVATE SDL3::SDL3)
+	elseif(SDL3_LIBRARIES)
+		target_link_libraries(surrealwidgets PRIVATE ${SDL3_LIBRARIES})
+		target_link_directories(surrealwidgets PRIVATE ${SDL3_LIBRARY_DIRS})
 	else()
 		target_link_libraries(surrealwidgets PRIVATE ${SDL3_LIBRARY})
 	endif()
@@ -432,6 +459,9 @@ if(SDL2_FOUND AND NOT SDL3_FOUND)
 	target_include_directories(surrealwidgets PRIVATE ${SDL2_INCLUDE_DIRS})
 	if(TARGET SDL2::SDL2)
 		target_link_libraries(surrealwidgets PRIVATE SDL2::SDL2)
+	elseif(SDL2_LIBRARIES)
+		target_link_libraries(surrealwidgets PRIVATE ${SDL2_LIBRARIES})
+		target_link_directories(surrealwidgets PRIVATE ${SDL2_LIBRARY_DIRS})
 	else()
 		target_link_libraries(surrealwidgets PRIVATE ${SDL2_LIBRARY})
 	endif()
