@@ -285,6 +285,18 @@ void VisibleFrame::ProcessNodeSurface(BspNode* node, bool front)
 		}
 	}
 
+	// A one-sided surface seen from behind is never drawn (UE1 did not either),
+	// and in a closed level a front face drawn earlier already hides it, so it
+	// hides nothing either: skip the clipper's test, over half of the surfaces
+	// in view. Not in a mirror's frame, whose view comes from the reflected
+	// position; portals, skies and mirrors themselves returned above.
+	if (!MirrorFlag && !(PolyFlags & PF_TwoSided))
+	{
+		vec4 plane = { node->PlaneX, node->PlaneY, node->PlaneZ, -node->PlaneW };
+		if (dot(ViewLocation, plane) < 0.0f)
+			return;
+	}
+
 	if (!Clipper.CheckSurface(points, numverts, (PolyFlags & PF_NoOcclude) == 0))
 		return;
 
