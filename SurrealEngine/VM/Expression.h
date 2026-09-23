@@ -16,11 +16,21 @@ public:
 	virtual void Visit(ExpressionVisitor* visitor) = 0;
 
 	int StatementIndex = -1;
+
+	// The leaves ExpressionEvaluator::Value makes without the visitor: about
+	// half of all expressions evaluated. Everything else is Other.
+	enum class LeafKind : uint8_t
+	{
+		Other, LocalVariable, InstanceVariable, BoolVariable, Self, NoObject, ObjectConst, NameConst,
+		IntConst, IntZero, IntOne, IntConstByte, ByteConst, FloatConst, True, False
+	};
+	LeafKind Leaf = LeafKind::Other;
 };
 
 class LocalVariableExpression : public Expression
 {
 public:
+	LocalVariableExpression() { Leaf = LeafKind::LocalVariable; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	UProperty* Variable = nullptr;
@@ -29,6 +39,7 @@ public:
 class InstanceVariableExpression : public Expression
 {
 public:
+	InstanceVariableExpression() { Leaf = LeafKind::InstanceVariable; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	UProperty* Variable = nullptr;
@@ -205,6 +216,7 @@ public:
 class SelfExpression : public Expression
 {
 public:
+	SelfExpression() { Leaf = LeafKind::Self; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 };
 
@@ -240,6 +252,7 @@ public:
 class IntConstExpression : public Expression
 {
 public:
+	IntConstExpression() { Leaf = LeafKind::IntConst; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	uint32_t Value = 0;
@@ -248,6 +261,7 @@ public:
 class FloatConstExpression : public Expression
 {
 public:
+	FloatConstExpression() { Leaf = LeafKind::FloatConst; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	float Value = 0.0f;
@@ -264,6 +278,7 @@ public:
 class ObjectConstExpression : public Expression
 {
 public:
+	ObjectConstExpression() { Leaf = LeafKind::ObjectConst; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	UObject* Object = nullptr;
@@ -272,6 +287,7 @@ public:
 class NameConstExpression : public Expression
 {
 public:
+	NameConstExpression() { Leaf = LeafKind::NameConst; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	NameString Value;
@@ -300,6 +316,7 @@ public:
 class ByteConstExpression : public Expression
 {
 public:
+	ByteConstExpression() { Leaf = LeafKind::ByteConst; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	uint8_t Value = 0;
@@ -308,24 +325,28 @@ public:
 class IntZeroExpression : public Expression
 {
 public:
+	IntZeroExpression() { Leaf = LeafKind::IntZero; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 };
 
 class IntOneExpression : public Expression
 {
 public:
+	IntOneExpression() { Leaf = LeafKind::IntOne; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 };
 
 class TrueExpression : public Expression
 {
 public:
+	TrueExpression() { Leaf = LeafKind::True; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 };
 
 class FalseExpression : public Expression
 {
 public:
+	FalseExpression() { Leaf = LeafKind::False; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 };
 
@@ -340,6 +361,7 @@ public:
 class NoObjectExpression : public Expression
 {
 public:
+	NoObjectExpression() { Leaf = LeafKind::NoObject; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 };
 
@@ -355,6 +377,7 @@ public:
 class IntConstByteExpression : public Expression
 {
 public:
+	IntConstByteExpression() { Leaf = LeafKind::IntConstByte; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	uint8_t Value = 0;
@@ -363,6 +386,7 @@ public:
 class BoolVariableExpression : public Expression
 {
 public:
+	BoolVariableExpression() { Leaf = LeafKind::BoolVariable; }
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	Expression* Variable = nullptr;

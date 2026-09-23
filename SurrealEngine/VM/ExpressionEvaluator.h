@@ -46,6 +46,7 @@ private:
 	// result of its own.
 	ExpressionValue Value(Expression* expr);
 	ExpressionValue Value(Expression* expr, UObject* context);
+	ExpressionValue VisitValue(Expression* expr); // Value, through the visitor
 
 	// Evaluates expr as this expression (Skip, Context): its value is this
 	// one's, and so is what it says the frame does next.

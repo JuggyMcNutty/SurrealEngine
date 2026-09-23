@@ -33,6 +33,32 @@ ExpressionEvalResult ExpressionEvaluator::Eval(Expression* expr, UObject* self, 
 
 ExpressionValue ExpressionEvaluator::Value(Expression* expr)
 {
+	// The commonest leaves, made here as their Expr would make them. None can
+	// throw, so none needs to be the StepExpression.
+	switch (expr->Leaf)
+	{
+	default: break;
+	case Expression::LeafKind::LocalVariable: return ExpressionValue::Variable(LocalVariables, static_cast<LocalVariableExpression*>(expr)->Variable);
+	case Expression::LeafKind::InstanceVariable: return ExpressionValue::Variable(Context->PropertyData.Data, static_cast<InstanceVariableExpression*>(expr)->Variable);
+	case Expression::LeafKind::BoolVariable: return Value(static_cast<BoolVariableExpression*>(expr)->Variable);
+	case Expression::LeafKind::Self: return ExpressionValue::ObjectValue(Self);
+	case Expression::LeafKind::NoObject: return ExpressionValue::ObjectValue(nullptr);
+	case Expression::LeafKind::ObjectConst: return ExpressionValue::ObjectValue(static_cast<ObjectConstExpression*>(expr)->Object);
+	case Expression::LeafKind::NameConst: return ExpressionValue::NameValue(static_cast<NameConstExpression*>(expr)->Value);
+	case Expression::LeafKind::IntConst: return ExpressionValue::IntValue(static_cast<IntConstExpression*>(expr)->Value);
+	case Expression::LeafKind::IntZero: return ExpressionValue::IntValue(0);
+	case Expression::LeafKind::IntOne: return ExpressionValue::IntValue(1);
+	case Expression::LeafKind::IntConstByte: return ExpressionValue::ByteValue(static_cast<IntConstByteExpression*>(expr)->Value);
+	case Expression::LeafKind::ByteConst: return ExpressionValue::ByteValue(static_cast<ByteConstExpression*>(expr)->Value);
+	case Expression::LeafKind::FloatConst: return ExpressionValue::FloatValue(static_cast<FloatConstExpression*>(expr)->Value);
+	case Expression::LeafKind::True: return ExpressionValue::BoolValue(true);
+	case Expression::LeafKind::False: return ExpressionValue::BoolValue(false);
+	}
+	return VisitValue(expr);
+}
+
+ExpressionValue ExpressionEvaluator::VisitValue(Expression* expr)
+{
 	auto oldExpr = Frame::StepExpression;
 	Frame::StepExpression = expr;
 
