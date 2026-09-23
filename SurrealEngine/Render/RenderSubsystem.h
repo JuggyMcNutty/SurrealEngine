@@ -47,6 +47,11 @@ public:
 	int TextureFrameCounter = 0;
 	int FrameCounter = 0;
 
+	// FrameCounter when the last scene started: an actor whose
+	// LastVisibleFrame is at least this was in view (or in a portal's view)
+	// last frame.
+	int SceneFrameStart = 0;
+
 	vec3* GetTempVertexBuffer(size_t count)
 	{
 		if (VertexBuffer.size() < count)

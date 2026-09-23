@@ -77,6 +77,9 @@ LauncherSettings::LauncherSettings()
 		if (!pad["InvertY"].is_undefined()) Gamepad.InvertY = pad["InvertY"].to_boolean();
 		if (!pad["CursorSpeed"].is_undefined()) Gamepad.CursorSpeed = (float)pad["CursorSpeed"].to_number();
 		if (!pad["Layout"].is_undefined()) Gamepad.Layout = pad["Layout"].to_string();
+
+		const JsonValue& perf = settings["Performance"];
+		if (!perf["AiLevelOfDetail"].is_undefined()) Performance.AiLevelOfDetail = perf["AiLevelOfDetail"].to_boolean();
 	}
 	catch (...)
 	{
@@ -140,10 +143,14 @@ void LauncherSettings::Save()
 	pad["CursorSpeed"] = JsonValue::number(Gamepad.CursorSpeed);
 	pad["Layout"] = JsonValue::string(Gamepad.Layout);
 
+	JsonValue perf = JsonValue::object();
+	perf["AiLevelOfDetail"] = JsonValue::boolean(Performance.AiLevelOfDetail);
+
 	JsonValue settings = JsonValue::object();
 	settings["RenderDevice"] = std::move(rendev);
 	settings["Games"] = std::move(games);
 	settings["Gamepad"] = std::move(pad);
+	settings["Performance"] = std::move(perf);
 
 	const std::string filename = GetSettingsFilename();
 	Directory::create(fs::path(filename).parent_path().string());

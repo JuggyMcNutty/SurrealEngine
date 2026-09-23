@@ -56,6 +56,8 @@ void VisibleActor::Process(VisibleFrame* frame, UActor* actor)
 	if (!frame->Clipper.IsAABBVisible(actor->BspInfo.BoundingBox))
 		return;
 
+	actor->LastVisibleFrame = frame->FrameCounter;
+
 	EDrawType dt = (EDrawType)actor->DrawType();
 	if (dt == DT_Mesh && actor->Mesh())
 	{

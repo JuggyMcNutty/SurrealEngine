@@ -385,6 +385,12 @@ public:
 
 	virtual void Tick(float elapsed);
 
+	// Whether the script Tick event and state code run this frame, and with
+	// how much time. With Performance.AiLevelOfDetail, a pawn out of the
+	// player's sight and not close thinks every third frame, given the time
+	// it skipped; movement, physics, animation and timers still run every frame.
+	bool ThinkThisFrame(float elapsed, float& thinkElapsed);
+
 	void TickAnimation(float elapsed);
 	void TickBlendAnimation(float elapsed);
 
@@ -575,6 +581,17 @@ public:
 	} TweenFromBlendAnimFrame[4];
 
 	int LastDrawFrame = -1;
+	// The frame this actor last passed the renderer's own visibility test
+	// (VisibleActor::Process): LastDrawFrame is only its BSP node's, which
+	// outdoors is nearly everything.
+	int LastVisibleFrame = -1;
+
+	// AI level of detail (ThinkThisFrame): -1 until known, then whether this
+	// is a pawn the player does not control; the frames since it last thought
+	// and the game time that has passed since.
+	int AiLodPawn = -1;
+	int AiFramesSinceThought = 0;
+	float AiTimeSinceThought = 0.0f;
 
 	float SleepTimeLeft = 0.0f;
 	vec3 gravityVector;

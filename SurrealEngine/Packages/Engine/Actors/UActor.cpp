@@ -14,6 +14,8 @@
 #include "Engine.h"
 #include "VM/ScriptCall.h"
 #include "VM/Frame.h"
+#include "Render/RenderSubsystem.h"
+#include "LauncherSettings.h"
 
 UActor* UActor::Spawn(UClass* SpawnClass, std::optional<UActor*> SpawnOwner, std::optional<NameString> SpawnTag, std::optional<vec3> SpawnLocation, std::optional<Rotator> SpawnRotation)
 {
@@ -177,9 +179,12 @@ void UActor::Tick(float elapsed)
 	if (engine->LaunchInfo.IsDeusEx())
 		TickBlendAnimation(elapsed);
 
-	if (Role() >= ROLE_SimulatedProxy && IsEventEnabled(EventName::Tick))
+	float thinkElapsed = elapsed;
+	bool think = ThinkThisFrame(elapsed, thinkElapsed);
+
+	if (think && Role() >= ROLE_SimulatedProxy && IsEventEnabled(EventName::Tick))
 	{
-		CallEvent(this, EventName::Tick, { ExpressionValue::FloatValue(elapsed) });
+		CallEvent(this, EventName::Tick, { ExpressionValue::FloatValue(thinkElapsed) });
 	}
 
 	if (StateFrame)
@@ -196,7 +201,7 @@ void UActor::Tick(float elapsed)
 				StateFrame->LatentState = LatentRunState::Continue;
 		}
 
-		if (Role() >= ROLE_SimulatedProxy && StateFrame->LatentState == LatentRunState::Continue)
+		if (think && Role() >= ROLE_SimulatedProxy && StateFrame->LatentState == LatentRunState::Continue)
 		{
 			StateFrame->Tick();
 		}
@@ -215,6 +220,37 @@ void UActor::Tick(float elapsed)
 			CallEvent(this, EventName::Timer);
 		}
 	}
+}
+
+bool UActor::ThinkThisFrame(float elapsed, float& thinkElapsed)
+{
+	thinkElapsed = elapsed;
+	if (!LauncherSettings::Get().Performance.AiLevelOfDetail)
+		return true;
+
+	if (AiLodPawn < 0)
+	{
+		AiLodPawn = (UObject::TryCast<UPawn>(this) && !UObject::TryCast<UPlayerPawn>(this)) ? 1 : 0;
+		AiFramesSinceThought = Index % 3; // spread the pawns over the three frames
+	}
+	if (!AiLodPawn)
+		return true;
+
+	AiTimeSinceThought += elapsed;
+	AiFramesSinceThought++;
+
+	constexpr float nearDistance = 1500.0f; // ~28 m: close enough to fight
+	UActor* player = engine->viewport->Actor();
+	bool seen = LastVisibleFrame >= engine->render->SceneFrameStart;
+	bool near = player && length(player->Location() - Location()) < nearDistance;
+	if (seen || near || AiFramesSinceThought >= 3)
+	{
+		thinkElapsed = AiTimeSinceThought;
+		AiTimeSinceThought = 0.0f;
+		AiFramesSinceThought = 0;
+		return true;
+	}
+	return false;
 }
 
 bool UActor::Move(const vec3& delta)

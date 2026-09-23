@@ -68,6 +68,12 @@ public:
 		std::string Layout = "modern";
 	} Gamepad;
 
+	// Speed for fidelity, for slow hardware (UActor::ThinkThisFrame).
+	struct
+	{
+		bool AiLevelOfDetail = false;
+	} Performance;
+
 private:
 	LauncherSettings();
 };
