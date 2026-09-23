@@ -57,7 +57,7 @@ public:
 	Array<UProperty*> CallParms;
 	UProperty* ReturnParm = nullptr;
 
-	// ExpressionEvaluator's own evaluation of this operator, if it has one
-	// (its FastOp), or 0; -1 before the first call.
+	// ExpressionEvaluator's own evaluation of this operator, if it has one:
+	// its Expression::TypedKind, or Generic; -1 before the first call.
 	int FastOperator = -1;
 };

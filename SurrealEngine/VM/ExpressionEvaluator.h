@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ExpressionVisitor.h"
+#include "Expression.h"
 #include "ExpressionValue.h"
 #include "Iterator.h"
 
@@ -53,6 +54,45 @@ private:
 	void PassThrough(Expression* expr, UObject* context);
 
 	bool IsStatement() const { return Out == &Result.Value; }
+
+	// A nested expression's value as a plain value, exactly as Value(expr)
+	// and its ToBool (ToByte, ToInt, ToFloat, ToObject, ToName) would give it:
+	// without an ExpressionValue where the node's Expression::TypedKind
+	// allows, through Value where it does not (Generic).
+	bool EvalBool(Expression* expr);
+	bool EvalBool(Expression* expr, UObject* context);
+	template<typename T> T EvalNumber(Expression* expr); // uint8_t, int32_t or float
+	UObject* EvalObject(Expression* expr);
+	NameString EvalName(Expression* expr);
+
+	// Value(expr) and its conversion, for nodes no typed kind covers. Kept out
+	// of line: the typed evaluators then need no ExpressionValue of their own.
+	bool GenericBool(Expression* expr);
+	template<typename T> T GenericNumber(Expression* expr);
+	UObject* GenericObject(Expression* expr);
+	NameString GenericName(Expression* expr);
+
+	// A typed operator's operands, evaluated in the caller's own context
+	template<typename T> void Operands(Expression* expr, T& a, T& b);
+	void ObjectOperands(Expression* expr, UObject*& a, UObject*& b);
+	void NameOperands(Expression* expr, NameString& a, NameString& b);
+	template<typename T> T& Target(Expression* expr); // the variable ++, += and -= change
+
+	// A typed operator's value, as the general path would have left it in Out
+	ExpressionValue OperatorValue(Expression* expr);
+
+	// A statement's assignment to a variable kind, stored as ExpressionValue's
+	// Store would store it; false for any other left side
+	bool Assign(Expression* lhs, Expression* rhs);
+
+	// Where a variable kind's value lives: in the locals (Local* kinds) or the
+	// context's properties (Instance* kinds). E is the node's class: a
+	// LocalVariableExpression, InstanceVariableExpression or BoolVariableExpression.
+	template<typename E> uint8_t* Local(Expression* expr) const;
+	template<typename E> uint8_t* Instance(Expression* expr) const;
+
+	static void Classify(Expression* expr);
+	static Expression::TypedKind OperatorKind(NativeFunctionExpression* expr);
 
 	void Expr(LocalVariableExpression* expr) override;
 	void Expr(InstanceVariableExpression* expr) override;

@@ -25,6 +25,38 @@ public:
 		IntConst, IntZero, IntOne, IntConstByte, ByteConst, FloatConst, True, False
 	};
 	LeafKind Leaf = LeafKind::Other;
+
+	// How ExpressionEvaluator's typed evaluators (EvalBool, EvalNumber, ...)
+	// take this node: as a plain value, with no ExpressionValue. Decided when
+	// one first meets it (ExpressionEvaluator::Classify). Generic nodes go
+	// through Value and its conversions, as every node did before.
+	enum class TypedKind : uint8_t
+	{
+		Unknown, Generic,
+		// Local and instance variables, read in place. Keep these together:
+		// ExpressionEvaluator tells a variable from a value by the range.
+		LocalByte, LocalInt, LocalBool, LocalFloat, LocalObject, LocalName,
+		InstanceByte, InstanceInt, InstanceBool, InstanceFloat, InstanceObject, InstanceName,
+		LocalBoolVariable, InstanceBoolVariable, // BoolVariable over a local or instance bool
+		// Constants
+		Self, NoObject, ObjectConst, NameConst, IntConst, IntZero, IntOne, IntConstByte, ByteConst, FloatConst, True, False,
+		// Skip (the right side of && and ||): its operand's value, for the
+		// typed evaluators only -- no operator takes it as an operand
+		Skip,
+		// Conversions
+		ByteToInt, ByteToBool, ByteToFloat, IntToByte, IntToBool, IntToFloat, BoolToByte, BoolToInt, BoolToFloat,
+		FloatToByte, FloatToInt, FloatToBool, ObjectToBool, NameToBool,
+		// && and ||, and the operators ExpressionEvaluator evaluates in place
+		// (its fast operators, UFunction::FastOperator)
+		AndAnd, OrOr,
+		NotEqual_ObjectObject, EqualEqual_ObjectObject, Not_PreBool,
+		Less_IntInt, LessEqual_IntInt, Greater_IntInt, GreaterEqual_IntInt, EqualEqual_IntInt, NotEqual_IntInt,
+		Less_FloatFloat, LessEqual_FloatFloat, Greater_FloatFloat, GreaterEqual_FloatFloat, NotEqual_FloatFloat,
+		Add_FloatFloat, Subtract_FloatFloat, Multiply_FloatFloat, Divide_FloatFloat, Subtract_IntInt,
+		AddAdd_Int, AddEqual_IntInt, AddEqual_FloatFloat, SubtractEqual_FloatFloat,
+		EqualEqual_NameName, NotEqual_NameName
+	};
+	TypedKind Typed = TypedKind::Unknown;
 };
 
 class LocalVariableExpression : public Expression
@@ -34,6 +66,11 @@ public:
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	UProperty* Variable = nullptr;
+
+	// Variable's offset and bool mask, kept here for the typed evaluators
+	// (set by ExpressionEvaluator::Classify)
+	uint32_t Offset = 0;
+	uint32_t Mask = 0;
 };
 
 class InstanceVariableExpression : public Expression
@@ -43,6 +80,10 @@ public:
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	UProperty* Variable = nullptr;
+
+	// As LocalVariableExpression's
+	uint32_t Offset = 0;
+	uint32_t Mask = 0;
 };
 
 class DefaultVariableExpression : public Expression
@@ -390,6 +431,11 @@ public:
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	Expression* Variable = nullptr;
+
+	// Variable's own offset and bool mask, when it is a local or instance
+	// variable: the typed evaluators read it without visiting Variable
+	uint32_t Offset = 0;
+	uint32_t Mask = 0;
 };
 
 class DynamicCastExpression : public Expression
@@ -773,6 +819,10 @@ public:
 
 	int nativeindex = 0;
 	Array<Expression*> Args;
+
+	// A typed operator's operands, Args[0] and Args[1], kept here for the
+	// typed evaluators (set by ExpressionEvaluator::Classify)
+	Expression* Operands[2] = {};
 };
 
 struct FunctionArgInfo
