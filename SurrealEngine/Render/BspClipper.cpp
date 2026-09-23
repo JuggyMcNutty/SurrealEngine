@@ -432,8 +432,9 @@ int BspClipper::ClipEdge(const ShadedVertex* const* verts)
 		//clipd[6] = v.gl_ClipDistance[0];
 		//clipd[7] = v.gl_ClipDistance[1];
 		//clipd[8] = v.gl_ClipDistance[2];
+		// Any distance not at least zero (a NaN too) means clipping, as the SSE path tests
 		for (int j = 0; j < numclipdistances; j++)
-			needsclipping = needsclipping || clipd[i];
+			needsclipping = needsclipping || !(clipd[j] >= 0.0f);
 		clipd += numclipdistances;
 	}
 
