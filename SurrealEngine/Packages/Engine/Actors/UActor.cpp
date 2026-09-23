@@ -243,10 +243,13 @@ bool UActor::ThinkThisFrame(float elapsed, float& thinkElapsed)
 	AiFramesSinceThought++;
 
 	constexpr float nearDistance = 1500.0f; // ~28 m: close enough to fight
+	constexpr float farDistance = 4000.0f; // ~76 m: beyond this, every sixth frame
 	UActor* player = engine->viewport->Actor();
 	bool seen = LastVisibleFrame >= engine->render->SceneFrameStart;
-	bool near = player && length(player->Location() - Location()) < nearDistance;
-	if (seen || near || AiFramesSinceThought >= 3)
+	float distance = player ? length(player->Location() - Location()) : 0.0f;
+	bool near = player && distance < nearDistance;
+	int interval = (player && distance > farDistance) ? 6 : 3;
+	if (seen || near || AiFramesSinceThought >= interval)
 	{
 		thinkElapsed = AiTimeSinceThought;
 		AiTimeSinceThought = 0.0f;

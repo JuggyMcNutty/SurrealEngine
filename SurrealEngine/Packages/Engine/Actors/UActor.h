@@ -387,8 +387,9 @@ public:
 
 	// Whether the script Tick event and state code run this frame, and with
 	// how much time. With Performance.AiLevelOfDetail, a pawn out of the
-	// player's sight and not close thinks every third frame, given the time
-	// it skipped; movement, physics, animation and timers still run every frame.
+	// player's sight and not close thinks every third frame (every sixth when
+	// far), given the time it skipped; movement, physics, animation and
+	// timers still run every frame.
 	bool ThinkThisFrame(float elapsed, float& thinkElapsed);
 
 	void TickAnimation(float elapsed);
