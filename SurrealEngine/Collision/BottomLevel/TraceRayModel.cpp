@@ -122,8 +122,11 @@ bool TraceRayModel::TraceAnyHit(const dvec3& origin, double tmin, const dvec3& d
 
 double TraceRayModel::NodeRayIntersect(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, BspNode* node, double t0, double t1)
 {
-	if (node->NumVertices < 3 || (node->Surf >= 0 && Model->Surfaces[node->Surf].PolyFlags & PF_NotSolid))
-		return tmax;
+	// The plane tests come first: they read only the node's plane, the part of
+	// it the traversal has just read, and turn away most nodes. Its vertex
+	// count lies on another cache line and its surface's flags in another
+	// array, so on the handheld those two tests were most of the time spent
+	// here. Every test returns tmax, so their order changes nothing else.
 
 	// Test if plane is actually crossed.
 	dvec4 plane = { node->PlaneX, node->PlaneY, node->PlaneZ, -node->PlaneW };
@@ -137,6 +140,9 @@ double TraceRayModel::NodeRayIntersect(const dvec3& origin, double tmin, const d
 	double partA = dot(dvec4(origin + dirNormalized * t0, 1.0), plane);
 	double partB = dot(dvec4(origin + dirNormalized * t1, 1.0), plane);
 	if ((partA > SplitMargin && partB > SplitMargin) || (partA < -SplitMargin && partB < -SplitMargin))
+		return tmax;
+
+	if (node->NumVertices < 3 || (node->Surf >= 0 && Model->Surfaces[node->Surf].PolyFlags & PF_NotSolid))
 		return tmax;
 
 	BspVert* v = &Model->Vertices[node->VertPool];
