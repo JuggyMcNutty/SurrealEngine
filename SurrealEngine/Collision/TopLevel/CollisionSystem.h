@@ -1,8 +1,6 @@
 #pragma once
 
 #include "Math/vec.h"
-#include <unordered_map>
-#include <list>
 
 class ULevel;
 class UActor;
@@ -108,8 +106,26 @@ private:
 		return ((x & 0x3ff) << 20) | ((y & 0x3ff) << 10) | (z & 0x3ff);
 	}
 
+	// The actors whose collision boxes reach each 256-unit cell, in the order
+	// they were added. An open-addressed table keyed by bucket id (linear
+	// probing, a power-of-two size, at most half full): finding a cell is a
+	// multiply and, for an empty one, usually one cache line of ids, where a
+	// std::unordered_map of std::lists took a division and a chain of
+	// pointers, and a list node allocated for every cell of every move. A
+	// cell keeps its slot once used, so the table only ever grows.
+	const Array<UActor*>& FindCell(uint32_t id) const;
+	Array<UActor*>& Cell(uint32_t id); // made if new
+	size_t FindSlot(uint32_t id) const; // NoSlot if the cell was never used
+	void GrowCells();
+	static uint32_t CellHash(uint32_t id) { uint32_t h = id * 0x9E3779B1u; return h ^ (h >> 16); }
+	static const uint32_t NoCell = 0xffffffff; // never a bucket id: those have 30 bits
+	static const size_t NoSlot = ~(size_t)0;
+
 	ULevel* Level = nullptr;
-	std::unordered_map<uint32_t, std::list<UActor*>> CollisionActors;
+	Array<uint32_t> CellIds; // NoCell where a slot is free
+	Array<Array<UActor*>> CellActors;
+	size_t CellCount = 0;
+	inline static const Array<UActor*> NoActors;
 
 	friend class CollisionTester;
 };

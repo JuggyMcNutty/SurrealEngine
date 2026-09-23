@@ -18,19 +18,14 @@ public:
 	static ivec3 GetRayEndExtents(const vec3& from, const vec3& to) { return CollisionSystem::GetRayEndExtents(from, to); }
 	static ivec3 GetSweepEndExtents(const vec3& from, const vec3& to, const vec3& extents) { return CollisionSystem::GetSweepEndExtents(from, to, extents); }
 
-	const std::list<UActor*>& GetActors(int x, int y, int z) const
+	const Array<UActor*>& GetActors(int x, int y, int z) const
 	{
-		auto it = Collision->CollisionActors.find(CollisionSystem::GetBucketId(x, y, z));
-		if (it != Collision->CollisionActors.end())
-			return it->second;
-		else
-			return emptyList;
+		return Collision->FindCell(CollisionSystem::GetBucketId(x, y, z));
 	}
 
 	ULevel* GetLevel() const { return Collision->Level; }
 
 private:
 	CollisionSystem* Collision = nullptr;
-	inline static std::list<UActor*> emptyList;
 	inline static int CheckCounter = 0;
 };

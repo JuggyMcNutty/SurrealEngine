@@ -140,7 +140,7 @@ void CollisionSystem::AddToCollision(UActor* actor)
 			{
 				for (int x = start.x; x < end.x; x++)
 				{
-					CollisionActors[GetBucketId(x, y, z)].push_back(actor);
+					Cell(GetBucketId(x, y, z)).push_back(actor);
 				}
 			}
 		}
@@ -162,12 +162,12 @@ void CollisionSystem::RemoveFromCollision(UActor* actor)
 			{
 				for (int x = start.x; x < end.x; x++)
 				{
-					auto it = CollisionActors.find(GetBucketId(x, y, z));
-					if (it != CollisionActors.end())
+					// Every entry, keeping the others in order, as std::list::remove did
+					size_t slot = FindSlot(GetBucketId(x, y, z));
+					if (slot != NoSlot)
 					{
-						it->second.remove(actor);
-						if (it->second.empty())
-							CollisionActors.erase(it);
+						Array<UActor*>& cell = CellActors[slot];
+						cell.erase(std::remove(cell.begin(), cell.end(), actor), cell.end());
 					}
 				}
 			}
@@ -175,4 +175,61 @@ void CollisionSystem::RemoveFromCollision(UActor* actor)
 
 		actor->Collision.Inserted = false;
 	}
+}
+
+size_t CollisionSystem::FindSlot(uint32_t id) const
+{
+	if (CellIds.empty())
+		return NoSlot;
+	size_t mask = CellIds.size() - 1;
+	for (size_t slot = CellHash(id) & mask; ; slot = (slot + 1) & mask)
+	{
+		uint32_t cellId = CellIds[slot];
+		if (cellId == id)
+			return slot;
+		if (cellId == NoCell)
+			return NoSlot;
+	}
+}
+
+const Array<UActor*>& CollisionSystem::FindCell(uint32_t id) const
+{
+	size_t slot = FindSlot(id);
+	return slot != NoSlot ? CellActors[slot] : NoActors;
+}
+
+Array<UActor*>& CollisionSystem::Cell(uint32_t id)
+{
+	if ((CellCount + 1) * 2 > CellIds.size())
+		GrowCells();
+	size_t mask = CellIds.size() - 1;
+	size_t slot = CellHash(id) & mask;
+	while (CellIds[slot] != id && CellIds[slot] != NoCell)
+		slot = (slot + 1) & mask;
+	if (CellIds[slot] == NoCell)
+	{
+		CellIds[slot] = id;
+		CellCount++;
+	}
+	return CellActors[slot];
+}
+
+void CollisionSystem::GrowCells()
+{
+	size_t capacity = std::max<size_t>(4096, CellIds.size() * 2);
+	Array<uint32_t> ids(capacity, NoCell);
+	Array<Array<UActor*>> actors(capacity);
+	size_t mask = capacity - 1;
+	for (size_t i = 0; i < CellIds.size(); i++)
+	{
+		if (CellIds[i] == NoCell)
+			continue;
+		size_t slot = CellHash(CellIds[i]) & mask;
+		while (ids[slot] != NoCell)
+			slot = (slot + 1) & mask;
+		ids[slot] = CellIds[i];
+		actors[slot] = std::move(CellActors[i]);
+	}
+	CellIds = std::move(ids);
+	CellActors = std::move(actors);
 }
