@@ -16,6 +16,18 @@ struct BlendInfo
 	float weight;
 };
 
+// One vertex of a mesh as DrawLodMeshFaceDX last computed it: valid for the
+// draw whose Generation it holds, its light and fog for the LightKey's flags.
+struct CachedMeshVertex
+{
+	uint32_t Generation = 0;
+	uint32_t LightKey = 0;
+	vec3 Point;
+	vec3 Normal;
+	vec3 Light;
+	vec4 Fog;
+};
+
 class VisibleMesh
 {
 public:
@@ -36,4 +48,7 @@ private:
 	void FindAttachmentPoints(ULodMesh* mesh, const mat4& ObjectToWorld, const int* vertexOffsets, float t0, float t1);
 
 	Array<vec3> attachmentTris;
+
+	Array<CachedMeshVertex> vertexCache;
+	uint32_t vertexCacheGeneration = 0;
 };
