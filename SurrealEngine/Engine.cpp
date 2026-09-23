@@ -1643,8 +1643,9 @@ void Engine::OnWindowMouseMove(const Point& pos)
 
 	if (engine->LaunchInfo.ue1Version > 219)
 	{
-		viewport->WindowsMouseX() = (float)(pos.x * window->GetDpiScale());
-		viewport->WindowsMouseY() = (float)(pos.y * window->GetDpiScale());
+		float scale = (float)window->GetDpiScale() * window->GetRenderDevice()->GetRenderScale();
+		viewport->WindowsMouseX() = pos.x * scale;
+		viewport->WindowsMouseY() = pos.y * scale;
 	}
 }
 

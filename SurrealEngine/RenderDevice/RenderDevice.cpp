@@ -49,6 +49,24 @@ std::unique_ptr<RenderDevice> RenderDevice::Create(Widget* viewport, RenderAPI r
 	}
 }
 
+float RenderDevice::GetRenderScale() const
+{
+	if (!SupportsRenderScale())
+		return 1.0f;
+	float scale = LauncherSettings::Get().Performance.RenderScale;
+	return std::isfinite(scale) ? std::clamp(scale, 0.25f, 1.0f) : 1.0f;
+}
+
+int RenderDevice::GetRenderWidth() const
+{
+	return std::max((int)std::lround(Viewport->GetNativePixelWidth() * GetRenderScale()), 1);
+}
+
+int RenderDevice::GetRenderHeight() const
+{
+	return std::max((int)std::lround(Viewport->GetNativePixelHeight() * GetRenderScale()), 1);
+}
+
 ////////////////////////////////////////////////////////////////////////////
 
 RenderDeviceCanvas::RenderDeviceCanvas(RenderDevice* device) : device(device)
@@ -61,12 +79,12 @@ void RenderDeviceCanvas::begin(const Colorf& color)
 
 	frame.XB = 0;
 	frame.YB = 0;
-	frame.X = device->Viewport->GetNativePixelWidth();
-	frame.Y = device->Viewport->GetNativePixelHeight();
-	frame.FX = (float)device->Viewport->GetNativePixelWidth();
-	frame.FY = (float)device->Viewport->GetNativePixelHeight();
-	frame.FX2 = (float)device->Viewport->GetNativePixelWidth() * 0.5f;
-	frame.FY2 = (float)device->Viewport->GetNativePixelHeight() * 0.5f;
+	frame.X = device->GetRenderWidth();
+	frame.Y = device->GetRenderHeight();
+	frame.FX = (float)device->GetRenderWidth();
+	frame.FY = (float)device->GetRenderHeight();
+	frame.FX2 = (float)device->GetRenderWidth() * 0.5f;
+	frame.FY2 = (float)device->GetRenderHeight() * 0.5f;
 	frame.Viewport = device->Viewport;
 	frame.FovAngle = 90.0f;
 	frame.ObjectToWorld = mat4::identity();

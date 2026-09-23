@@ -43,6 +43,7 @@ public:
 	void SetHitLocation();
 
 	bool SupportsTextureFormat(TextureFormat Format) override;
+	bool SupportsRenderScale() const override { return true; }
 	void UpdateTextureRect(TextureInfo& Info, int U, int V, int UL, int VL) override;
 
 	std::shared_ptr<VulkanDevice> Device;

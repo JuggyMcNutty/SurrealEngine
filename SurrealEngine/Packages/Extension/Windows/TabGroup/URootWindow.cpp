@@ -7,6 +7,8 @@
 #include "Packages/Engine/Resources/Textures/UTexture.h"
 #include "Packages/Extension/Windows/UGC.h"
 #include "Engine.h"
+#include "GameWindow.h"
+#include "RenderDevice/RenderDevice.h"
 
 void URootWindow::EnablePositionalSound(std::optional<bool> bEnable)
 {
@@ -366,7 +368,8 @@ bool URootWindow::OnWindowRawMouseMove(int dx, int dy)
 {
 	if (IsCursorVisible())
 	{
-		float mouseSpeed = 1.0f / GetVirtualScale();
+		// Deltas are window pixels; the UI is laid out in render pixels
+		float mouseSpeed = engine->window->GetRenderDevice()->GetRenderScale() / GetVirtualScale();
 		SetRootCursorPos(MouseX() + dx * mouseSpeed, MouseY() + dy * mouseSpeed);
 	}
 	return IsModalOpen();

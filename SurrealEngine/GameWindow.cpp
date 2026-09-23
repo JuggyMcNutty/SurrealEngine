@@ -29,14 +29,16 @@ RenderDevice* GameWindow::GetRenderDevice()
 	return device.get();
 }
 
+// The size the game draws at: the window's, unless the render device draws
+// the scene smaller and scales it up (RenderDevice::GetRenderScale).
 int GameWindow::GetPixelWidth()
 {
-	return GetNativePixelWidth();
+	return device ? device->GetRenderWidth() : GetNativePixelWidth();
 }
 
 int GameWindow::GetPixelHeight()
 {
-	return GetNativePixelHeight();
+	return device ? device->GetRenderHeight() : GetNativePixelHeight();
 }
 
 void GameWindow::ToggleWindowFullscreen(Size newResolution)

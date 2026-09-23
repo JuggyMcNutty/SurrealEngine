@@ -72,6 +72,7 @@ public:
 	struct
 	{
 		bool AiLevelOfDetail = false;
+		float RenderScale = 1.0f; // the scene's size as a fraction of the window's (RenderDevice::GetRenderScale)
 	} Performance;
 
 private:

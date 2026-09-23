@@ -192,11 +192,11 @@ void VulkanRenderDevice::Lock(vec4 InFlashScale, vec4 InFlashFog, vec4 ScreenCle
 	ForceHitIndex = -1;
 
 	// If frame textures no longer match the window or user settings, recreate them along with the swap chain
-	if (!Textures->Scene || Textures->Scene->Width != Viewport->GetNativePixelWidth() || Textures->Scene->Height != Viewport->GetNativePixelHeight() ||Textures->Scene->Multisample != GetSettingsMultisample())
+	if (!Textures->Scene || Textures->Scene->Width != GetRenderWidth() || Textures->Scene->Height != GetRenderHeight() ||Textures->Scene->Multisample != GetSettingsMultisample())
 	{
 		Framebuffers->DestroySceneFramebuffer();
 		Textures->Scene.reset();
-		Textures->Scene.reset(new SceneTextures(this, Viewport->GetNativePixelWidth(), Viewport->GetNativePixelHeight(), GetSettingsMultisample()));
+		Textures->Scene.reset(new SceneTextures(this, GetRenderWidth(), GetRenderHeight(), GetSettingsMultisample()));
 		RenderPasses->CreateRenderPass();
 		RenderPasses->CreatePipelines();
 		Framebuffers->CreateSceneFramebuffer();
@@ -875,8 +875,8 @@ void VulkanRenderDevice::ReadPixels(TextureColor* Pixels)
 	// Convert from rgba16f to bgra8 using the GPU:
 	auto srcimage = Textures->Scene->PPImage[GammaCorrectScreenshots ? 1 : 0].get();
 
-	int w = Viewport->GetNativePixelWidth();
-	int h = Viewport->GetNativePixelHeight();
+	int w = GetRenderWidth();
+	int h = GetRenderHeight();
 	void* data = Pixels;
 
 	auto dstimage = ImageBuilder()
@@ -1401,8 +1401,9 @@ PresentPushConstants VulkanRenderDevice::GetPresentPushConstants()
 
 void VulkanRenderDevice::DrawPresentTexture(int width, int height)
 {
-	int vpWidth = Viewport->GetNativePixelWidth();
-	int vpHeight = Viewport->GetNativePixelHeight();
+	// The scene's size: the image scales from it to the window's
+	int vpWidth = GetRenderWidth();
+	int vpHeight = GetRenderHeight();
 
 	PresentPushConstants pushconstants = GetPresentPushConstants();
 

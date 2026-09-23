@@ -122,6 +122,15 @@ public:
 	virtual bool SupportsTextureFormat(TextureFormat Format) = 0;
 	virtual void UpdateTextureRect(TextureInfo& Info, int U, int V, int UL, int VL) = 0;
 
+	// A device that draws the scene offscreen and scales it to the window when
+	// presenting can draw it smaller than the window (Settings.json
+	// Performance.RenderScale). The game -- the viewport, the canvas, the UI --
+	// then sees the render size, not the window's.
+	virtual bool SupportsRenderScale() const { return false; }
+	float GetRenderScale() const;
+	int GetRenderWidth() const;
+	int GetRenderHeight() const;
+
 	bool ParseCommand(std::string* cmd, const std::string& keyword) { return false; }
 
 	Widget* Viewport = nullptr;
