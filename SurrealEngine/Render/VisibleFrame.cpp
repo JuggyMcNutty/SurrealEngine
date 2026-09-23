@@ -167,23 +167,29 @@ void VisibleFrame::ProcessNodeSurface(BspNode* node, bool front)
 	UModel* model = engine->Level->Model;
 	const BspSurface& surface = model->Surfaces[node->Surf];
 
+	// The surface's points, gathered only when a test needs them: over half
+	// the surfaces in view are one-sided back faces, skipped below without.
 	int numverts = node->NumVertices;
-	vec3* points = engine->render->GetTempVertexBuffer(numverts);
-	BspVert* v = &model->Vertices[node->VertPool];
-	if (MirrorFlag)
+	vec3* points = nullptr;
+	auto gatherPoints = [&]()
 	{
-		for (int j = 0; j < numverts; j++)
+		points = engine->render->GetTempVertexBuffer(numverts);
+		BspVert* v = &model->Vertices[node->VertPool];
+		if (MirrorFlag)
 		{
-			points[numverts - 1 - j] = model->Points[v[j].Vertex];
+			for (int j = 0; j < numverts; j++)
+			{
+				points[numverts - 1 - j] = model->Points[v[j].Vertex];
+			}
 		}
-	}
-	else
-	{
-		for (int j = 0; j < numverts; j++)
+		else
 		{
-			points[j] = model->Points[v[j].Vertex];
+			for (int j = 0; j < numverts; j++)
+			{
+				points[j] = model->Points[v[j].Vertex];
+			}
 		}
-	}
+	};
 
 	uint32_t PolyFlags = surface.PolyFlags;
 	UTexture* texture = surface.Material;
@@ -206,6 +212,7 @@ void VisibleFrame::ProcessNodeSurface(BspNode* node, bool front)
 			UZoneInfo* zoneInfo = engine->GetZoneActor(zone);
 			if (zoneInfo->SkyZone())
 			{
+				gatherPoints();
 				Array<PortalSpan> spans = Clipper.CheckPortal(points, numverts);
 				if (!spans.empty())
 				{
@@ -236,6 +243,7 @@ void VisibleFrame::ProcessNodeSurface(BspNode* node, bool front)
 				UWarpZoneInfo* warpZone = UObject::TryCast<UWarpZoneInfo>(engine->GetZoneActor(portalZone));
 				if (warpZone)
 				{
+					gatherPoints();
 					Array<PortalSpan> spans = Clipper.CheckPortal(points, numverts);
 					if (!spans.empty())
 					{
@@ -263,6 +271,7 @@ void VisibleFrame::ProcessNodeSurface(BspNode* node, bool front)
 			if (PortalDepth > 0) // To do: cull backfacing surfaces so we don't need this hack
 				return;
 
+			gatherPoints();
 			Array<PortalSpan> spans = Clipper.CheckPortal(points, numverts);
 			if (!spans.empty())
 			{
@@ -297,6 +306,7 @@ void VisibleFrame::ProcessNodeSurface(BspNode* node, bool front)
 			return;
 	}
 
+	gatherPoints();
 	if (!Clipper.CheckSurface(points, numverts, (PolyFlags & PF_NoOcclude) == 0))
 		return;
 
