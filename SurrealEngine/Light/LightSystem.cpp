@@ -117,7 +117,24 @@ void LightSystem::BeginFrame()
 
 		LightTree.Lights.push_back(actor);
 	}
-	LightTree.CreateTLAS();
+
+	// The tree is built from the lights, their order, locations and radii
+	// alone: when none of those changed, last frame's tree is this frame's.
+	bool sameLights = TreeLights.size() == LightTree.Lights.size();
+	for (size_t i = 0; sameLights && i < TreeLights.size(); i++)
+	{
+		UActor* light = LightTree.Lights[i];
+		const TreeLight& last = TreeLights[i];
+		sameLights = last.Actor == light && last.Location == light->Location() && last.Radius == light->WorldLightRadius();
+	}
+	if (!sameLights)
+	{
+		TreeLights.clear();
+		for (UActor* light : LightTree.Lights)
+			TreeLights.push_back({ light, light->Location(), light->WorldLightRadius() });
+		LightTree.CreateTLAS();
+		LightTreeVersion++;
+	}
 }
 
 void LightSystem::UpdateLightList(UActor* actor)

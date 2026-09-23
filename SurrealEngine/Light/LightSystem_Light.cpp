@@ -79,6 +79,31 @@ TextureInfo LightSystem::GetLevelLightmap(BspSurface& surface, UZoneInfo* zoneAc
 	return GetLightmap(model, surface.LightMap, mapCoords, zoneActor, surface.Center, surface.Radius, nullptr, surface.PolyFlags & PF_SpecialLit);
 }
 
+// The tree's lights for a lightmap's surface. Every visible surface asked
+// the tree again every frame (~6 ms a frame on the handheld); its answer is
+// now kept until the tree is rebuilt, or the surface's sphere differs.
+const Array<UActor*>& LightSystem::CollectSurfaceLights(UModel* model, int lightmapIndex, const vec3& center, float radius)
+{
+	if (SurfaceLightCacheModel != model)
+	{
+		SurfaceLightCache.clear();
+		SurfaceLightCacheModel = model;
+	}
+	if (SurfaceLightCache.size() <= (size_t)lightmapIndex)
+		SurfaceLightCache.resize(std::max(model->LightMap.size(), (size_t)lightmapIndex + 1));
+
+	SurfaceLights& entry = SurfaceLightCache[lightmapIndex];
+	if (entry.Version != LightTreeVersion || entry.Center != center || entry.Radius != radius)
+	{
+		LightTree.CollectLights(center, radius);
+		entry.Lights = LightTree.CollectedLights;
+		entry.Version = LightTreeVersion;
+		entry.Center = center;
+		entry.Radius = radius;
+	}
+	return entry.Lights;
+}
+
 TextureInfo LightSystem::GetLightmap(UModel* model, int lightmapIndex, const Coords& coords, UZoneInfo* zoneActor, const vec3& worldLocation, float radius, UMover* dynamicMover, bool specialLit)
 {
 	if (lightmapIndex < 0)
@@ -125,8 +150,7 @@ TextureInfo LightSystem::GetLightmap(UModel* model, int lightmapIndex, const Coo
 
 		// Look at all lights potentially touching the surface. They go into our dynamic light list:
 
-		LightTree.CollectLights(worldLocation, radius);
-		for (UActor* light : LightTree.CollectedLights)
+		for (UActor* light : CollectSurfaceLights(model, lightmapIndex, worldLocation, radius))
 		{
 			if (light->Light.LightmapCheckCounter != checkCounter)
 			{

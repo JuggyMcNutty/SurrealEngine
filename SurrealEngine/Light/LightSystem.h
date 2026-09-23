@@ -203,6 +203,7 @@ private:
 	TextureInfo GetLightmap(UModel* model, int lightmapIndex, const Coords& coords, UZoneInfo* zoneActor, const vec3& worldLocation, float radius, UMover* mover, bool specialLit);
 	TextureInfo GetFogmap(UModel* model, int lightmapIndex, const Coords& coords, UZoneInfo* zoneActor);
 	void CheckLight(UActor* light);
+	const Array<UActor*>& CollectSurfaceLights(UModel* model, int lightmapIndex, const vec3& center, float radius);
 	void UpdateFogmapTexture(uint32_t* texels, UModel* model, const Coords& mapCoords, int lightMap, UZoneInfo* zoneActor);
 
 	ULevel* Level = nullptr;
@@ -220,4 +221,27 @@ private:
 
 	Array<UActor*> TempDynLightList;
 	LightActorTree LightTree;
+
+	// What the light tree was last built from: each light, where it is and
+	// how far it reaches, in order. While that stays the same, so do the tree
+	// and its every answer; LightTreeVersion counts the builds.
+	struct TreeLight
+	{
+		UActor* Actor;
+		vec3 Location;
+		float Radius;
+	};
+	Array<TreeLight> TreeLights;
+	uint64_t LightTreeVersion = 0;
+
+	// Each lightmap's lights from the tree, as of the version they were found in
+	struct SurfaceLights
+	{
+		uint64_t Version = 0;
+		vec3 Center = vec3(0.0f);
+		float Radius = 0.0f;
+		Array<UActor*> Lights;
+	};
+	Array<SurfaceLights> SurfaceLightCache;
+	UModel* SurfaceLightCacheModel = nullptr;
 };
