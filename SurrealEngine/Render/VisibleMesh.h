@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Math/mat.h"
+#include "RenderDevice/RenderDevice.h"
 
 class UActor;
 class UMesh;
@@ -51,4 +52,5 @@ private:
 
 	Array<CachedMeshVertex> vertexCache;
 	uint32_t vertexCacheGeneration = 0;
+	Array<GouraudVertex> faceBatch;
 };

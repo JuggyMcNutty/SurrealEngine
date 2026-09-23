@@ -1012,9 +1012,23 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 		return true;
 	};
 
-	GouraudVertex vertices[3];
 	TextureInfo texinfo;
 	UTexture* texinfoTexture = nullptr;
+
+	// Consecutive faces with one texture and one set of flags go to the
+	// device in one call, which sets up the texture and pipeline once
+	faceBatch.clear();
+	uint32_t batchFlags = 0;
+	auto drawBatch = [&]()
+	{
+		if (!faceBatch.empty())
+		{
+			frame->Device->DrawGouraudTriangles(&frame->Frame, texinfo, faceBatch.data(), (int)(faceBatch.size() / 3), batchFlags);
+			faceBatch.clear();
+		}
+	};
+
+	GouraudVertex vertices[3];
 	for (const MeshFace& face : faces)
 	{
 		if (face.MaterialIndex >= mesh->Materials.size())
@@ -1043,6 +1057,10 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 			// We already drew the opaque surface
 			continue;
 		}
+
+		uint32_t drawFlags = renderflags | PF_RenderFog;
+		if (tex != texinfoTexture || drawFlags != batchFlags)
+			drawBatch();
 
 		engine->render->UpdateTexture(tex);
 
@@ -1081,7 +1099,10 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 				if (c.Generation != generation)
 				{
 					if (!animateVertex(vindex, c.Point, c.Normal))
+					{
+						drawBatch();
 						return false;
+					}
 					c.Generation = generation;
 					c.LightKey = 0;
 				}
@@ -1091,6 +1112,7 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 			}
 			else if (!animateVertex(vindex, vertices[i].Point, normals[i]))
 			{
+				drawBatch();
 				return false;
 			}
 			vertices[i].UV = { wedge.U * uscale, wedge.V * vscale };
@@ -1128,10 +1150,12 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 			}
 		}
 
-		renderflags |= PF_RenderFog;
-
-		frame->Device->DrawGouraudPolygon(&frame->Frame, texinfo, vertices, 3, renderflags);
+		faceBatch.push_back(vertices[0]);
+		faceBatch.push_back(vertices[1]);
+		faceBatch.push_back(vertices[2]);
+		batchFlags = drawFlags;
 	}
+	drawBatch();
 
 	return needTranslucentPass;
 }

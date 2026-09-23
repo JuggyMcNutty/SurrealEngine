@@ -504,58 +504,7 @@ void VulkanRenderDevice::DrawGouraudPolygon(SceneNode* Frame, TextureInfo& Info,
 		uint32_t* iptr = alloc.iptr;
 		uint32_t vpos = alloc.vpos;
 
-		if (PolyFlags & PF_Modulated)
-		{
-			SceneVertex* vertex = vptr;
-			for (int i = 0; i < NumPts; i++)
-			{
-				const GouraudVertex* P = &Pts[i];
-				vertex->Flags = flags;
-				vertex->Position.x = P->Point.x;
-				vertex->Position.y = P->Point.y;
-				vertex->Position.z = P->Point.z;
-				vertex->TexCoord.s = P->UV.x * UMult;
-				vertex->TexCoord.t = P->UV.y * VMult;
-				vertex->TexCoord2.s = P->Fog.x;
-				vertex->TexCoord2.t = P->Fog.y;
-				vertex->TexCoord3.s = P->Fog.z;
-				vertex->TexCoord3.t = P->Fog.w;
-				vertex->TexCoord4.s = 0.0f;
-				vertex->TexCoord4.t = 0.0f;
-				vertex->Color.r = 1.0f;
-				vertex->Color.g = 1.0f;
-				vertex->Color.b = 1.0f;
-				vertex->Color.a = 1.0f;
-				vertex->TextureBinds = textureBinds;
-				vertex++;
-			}
-		}
-		else
-		{
-			SceneVertex* vertex = vptr;
-			for (int i = 0; i < NumPts; i++)
-			{
-				const GouraudVertex* P = &Pts[i];
-				vertex->Flags = flags;
-				vertex->Position.x = P->Point.x;
-				vertex->Position.y = P->Point.y;
-				vertex->Position.z = P->Point.z;
-				vertex->TexCoord.s = P->UV.x * UMult;
-				vertex->TexCoord.t = P->UV.y * VMult;
-				vertex->TexCoord2.s = P->Fog.x;
-				vertex->TexCoord2.t = P->Fog.y;
-				vertex->TexCoord3.s = P->Fog.z;
-				vertex->TexCoord3.t = P->Fog.w;
-				vertex->TexCoord4.s = 0.0f;
-				vertex->TexCoord4.t = 0.0f;
-				vertex->Color.r = P->Light.x;
-				vertex->Color.g = P->Light.y;
-				vertex->Color.b = P->Light.z;
-				vertex->Color.a = 1.0f;
-				vertex->TextureBinds = textureBinds;
-				vertex++;
-			}
-		}
+		WriteGouraudVertices(vptr, Pts, NumPts, PolyFlags, flags, UMult, VMult, textureBinds);
 
 		uint32_t vstart = vpos;
 		uint32_t vcount = NumPts;
@@ -570,6 +519,102 @@ void VulkanRenderDevice::DrawGouraudPolygon(SceneNode* Frame, TextureInfo& Info,
 	}
 
 	Stats.GouraudPolygons++;
+}
+
+void VulkanRenderDevice::WriteGouraudVertices(SceneVertex* vptr, const GouraudVertex* Pts, int NumPts, uint32_t PolyFlags, int flags, float UMult, float VMult, ivec4 textureBinds)
+{
+	if (PolyFlags & PF_Modulated)
+	{
+		SceneVertex* vertex = vptr;
+		for (int i = 0; i < NumPts; i++)
+		{
+			const GouraudVertex* P = &Pts[i];
+			vertex->Flags = flags;
+			vertex->Position.x = P->Point.x;
+			vertex->Position.y = P->Point.y;
+			vertex->Position.z = P->Point.z;
+			vertex->TexCoord.s = P->UV.x * UMult;
+			vertex->TexCoord.t = P->UV.y * VMult;
+			vertex->TexCoord2.s = P->Fog.x;
+			vertex->TexCoord2.t = P->Fog.y;
+			vertex->TexCoord3.s = P->Fog.z;
+			vertex->TexCoord3.t = P->Fog.w;
+			vertex->TexCoord4.s = 0.0f;
+			vertex->TexCoord4.t = 0.0f;
+			vertex->Color.r = 1.0f;
+			vertex->Color.g = 1.0f;
+			vertex->Color.b = 1.0f;
+			vertex->Color.a = 1.0f;
+			vertex->TextureBinds = textureBinds;
+			vertex++;
+		}
+	}
+	else
+	{
+		SceneVertex* vertex = vptr;
+		for (int i = 0; i < NumPts; i++)
+		{
+			const GouraudVertex* P = &Pts[i];
+			vertex->Flags = flags;
+			vertex->Position.x = P->Point.x;
+			vertex->Position.y = P->Point.y;
+			vertex->Position.z = P->Point.z;
+			vertex->TexCoord.s = P->UV.x * UMult;
+			vertex->TexCoord.t = P->UV.y * VMult;
+			vertex->TexCoord2.s = P->Fog.x;
+			vertex->TexCoord2.t = P->Fog.y;
+			vertex->TexCoord3.s = P->Fog.z;
+			vertex->TexCoord3.t = P->Fog.w;
+			vertex->TexCoord4.s = 0.0f;
+			vertex->TexCoord4.t = 0.0f;
+			vertex->Color.r = P->Light.x;
+			vertex->Color.g = P->Light.y;
+			vertex->Color.b = P->Light.z;
+			vertex->Color.a = 1.0f;
+			vertex->TextureBinds = textureBinds;
+			vertex++;
+		}
+	}
+}
+
+void VulkanRenderDevice::DrawGouraudTriangles(SceneNode* Frame, TextureInfo& Info, const GouraudVertex* Pts, int NumTris, uint32_t PolyFlags)
+{
+	if (NumTris <= 0) return;
+
+	// What DrawGouraudPolygon does for each triangle, with the pipeline, the
+	// texture and its binding looked up once for all of them
+	uint32_t requestedFlags = PolyFlags;
+	PolyFlags = ApplyPrecedenceRules(PolyFlags);
+
+	SetPipeline(RenderPasses->GetPipeline(PolyFlags));
+
+	CachedTexture* tex = Textures->GetTexture(&Info, !!(PolyFlags & PF_Masked));
+	ivec4 textureBinds = GetTextureIndexes(PolyFlags, tex);
+
+	float UMult = GetUMult(Info);
+	float VMult = GetVMult(Info);
+	int flags = (PolyFlags & (PF_RenderFog | PF_Translucent | PF_Modulated)) == PF_RenderFog ? 16 : 0;
+
+	if ((PolyFlags & (PF_Translucent | PF_Modulated)) == 0 && LightMode == 2) flags |= 32;
+
+	int NumPts = NumTris * 3;
+	auto alloc = ReserveVertices(NumPts, NumPts);
+	if (!alloc.vptr)
+	{
+		// More than the whole buffer: one triangle at a time, as before
+		RenderDevice::DrawGouraudTriangles(Frame, Info, Pts, NumTris, requestedFlags);
+		return;
+	}
+
+	WriteGouraudVertices(alloc.vptr, Pts, NumPts, PolyFlags, flags, UMult, VMult, textureBinds);
+
+	uint32_t* iptr = alloc.iptr;
+	for (uint32_t i = 0; i < (uint32_t)NumPts; i++)
+		*(iptr++) = alloc.vpos + i;
+
+	UseVertices(NumPts, NumPts);
+
+	Stats.GouraudPolygons += NumTris;
 }
 
 void VulkanRenderDevice::DrawTile(SceneNode* Frame, TextureInfo& Info, float X, float Y, float XL, float YL, float U, float V, float UL, float VL, float Z, vec4 Color, vec4 Fog, uint32_t PolyFlags)
