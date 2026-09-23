@@ -226,7 +226,8 @@ void UActor::FireHitWall(const CollisionHit& hit)
 
 bool UActor::TryStepToGround(vec3 stepDownDelta)
 {
-	CollisionHit floorHit = TryMove(stepDownDelta, true);
+	CollisionHitList hits;
+	CollisionHit floorHit = TryMove(stepDownDelta, true, true, &hits);
 
 	//check if floo was reached, or if we would be falling now
 	if (floorHit.Fraction == 1.0f || floorHit.Normal.z < 0.7071f)
@@ -235,8 +236,11 @@ bool UActor::TryStepToGround(vec3 stepDownDelta)
 		return false;
 	}
 
-	// We could reach the ground. Step down there.
-	floorHit = TryMove(stepDownDelta);
+	// We could reach the ground. Step down there: nothing has changed since
+	// the dry run, whose trace is the one TryMove would make again, so the
+	// move is made with it. (A dry run that traced nothing -- a static actor,
+	// too small a step -- cannot have found a floor.)
+	floorHit = FinishMove(stepDownDelta, hits, floorHit);
 	if (floorHit.Fraction != 1.0f)
 		SetBase(floorHit.Actor, true);
 	return true;
@@ -393,7 +397,7 @@ bool UActor::TraceThisActor(vec3& TraceEnd, vec3 TraceStart, vec3* HitLocation, 
 	return true;
 }
 
-CollisionHit UActor::TryMove(const vec3& delta, bool dryRun, bool isOwnBaseBlocking)
+CollisionHit UActor::TryMove(const vec3& delta, bool dryRun, bool isOwnBaseBlocking, CollisionHitList* traced)
 {
 	// Static and non-movable objects can't move
 	if (bStatic() || !bMovable())
@@ -407,10 +411,21 @@ CollisionHit UActor::TryMove(const vec3& delta, bool dryRun, bool isOwnBaseBlock
 	if (dot(delta, delta) < 0.00000001f)
 		return {};
 
+	CollisionHitList localHits;
+	CollisionHitList& hits = traced ? *traced : localHits;
+	CollisionHit blockingHit = TraceMove(delta, isOwnBaseBlocking, hits);
+
+	if (dryRun)
+		return blockingHit;
+
+	return FinishMove(delta, hits, blockingHit);
+}
+
+CollisionHit UActor::TraceMove(const vec3& delta, bool isOwnBaseBlocking, CollisionHitList& hits)
+{
 	// Analyze what we will hit if we move as requested and stop if it is the level or a blocking actor
 	bool useBlockPlayers = UObject::TryCast<UPlayerPawn>(this) || UObject::TryCast<UProjectile>(this);
 	CollisionHit blockingHit;
-	CollisionHitList hits;
 	if (!Brush())
 	{
 		hits = XLevel()->Collision.Trace(Location(), Location() + delta, CollisionHeight(), CollisionRadius(), bCollideActors(), bCollideWorld(), false);
@@ -441,9 +456,12 @@ CollisionHit UActor::TryMove(const vec3& delta, bool dryRun, bool isOwnBaseBlock
 			}
 		}
 	}
+	return blockingHit;
+}
 
-	if (dryRun)
-		return blockingHit;
+CollisionHit UActor::FinishMove(const vec3& delta, const CollisionHitList& hits, CollisionHit blockingHit)
+{
+	bool useBlockPlayers = UObject::TryCast<UPlayerPawn>(this) || UObject::TryCast<UProjectile>(this);
 
 	vec3 actuallyMoved = delta * blockingHit.Fraction;
 	vec3 OldLocation = Location();

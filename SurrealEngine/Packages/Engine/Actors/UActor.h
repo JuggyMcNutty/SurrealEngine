@@ -19,6 +19,7 @@ class U227SkeletalMeshInstance;
 class U227Projector;
 class U227AnimationNotify;
 class CollisionHit;
+class CollisionHitList;
 class BspNode;
 
 struct PointRegion
@@ -449,7 +450,13 @@ public:
 	// Unreal 227 - Perform a single line check with this actor
 	bool TraceThisActor(vec3& TraceEnd, vec3 TraceStart, vec3* HitLocation, vec3* HitNormal, std::optional<vec3> Extent);
 
-	CollisionHit TryMove(const vec3& delta, bool dryRun = false, bool isOwnBaseBlocking = true);
+	// A dry run given traced keeps there what it hit, for FinishMove to make
+	// the same move without tracing it again.
+	CollisionHit TryMove(const vec3& delta, bool dryRun = false, bool isOwnBaseBlocking = true, CollisionHitList* traced = nullptr);
+	// TryMove in two halves: what the move would hit (hits, and the blocking
+	// hit returned), and the move itself given those.
+	CollisionHit TraceMove(const vec3& delta, bool isOwnBaseBlocking, CollisionHitList& hits);
+	CollisionHit FinishMove(const vec3& delta, const CollisionHitList& hits, CollisionHit blockingHit);
 	CollisionHit TryMoveSmooth(const vec3& delta);
 	bool Move(const vec3& delta);
 	bool MoveSmooth(const vec3& delta);
