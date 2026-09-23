@@ -102,6 +102,24 @@ public:
 		}
 	}
 
+	// Nearest first, equal fractions kept in their order: the order
+	// std::stable_sort gives, without the buffer it took from the heap on
+	// every trace. A trace's hits are few, so an insertion sort.
+	void SortByFraction()
+	{
+		for (size_t i = 1; i < count; i++)
+		{
+			CollisionHit hit = items[i];
+			size_t j = i;
+			while (j > 0 && hit.Fraction < items[j - 1].Fraction)
+			{
+				items[j] = items[j - 1];
+				j--;
+			}
+			items[j] = hit;
+		}
+	}
+
 private:
 	void reserve(size_t newcapacity)
 	{

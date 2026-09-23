@@ -74,23 +74,25 @@ CollisionHitList TraceTester::Trace(const vec3& from, const vec3& to, float heig
 
 	// Sort by closest hit and only include the first hit for each actor
 
-	std::stable_sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) { return a.Fraction < b.Fraction; });
-	std::set<UActor*> seenActors;
+	hits.SortByFraction();
 	CollisionHitList uniqueHits;
 	for (auto& hit : hits)
 	{
+		// The hits kept are few: a scan of them, not a std::set allocated per trace
+		bool seen = false;
 		if (hit.Actor)
 		{
-			if (seenActors.find(hit.Actor) == seenActors.end())
+			for (const CollisionHit& kept : uniqueHits)
 			{
-				seenActors.insert(hit.Actor);
-				uniqueHits.push_back(hit);
+				if (kept.Actor == hit.Actor)
+				{
+					seen = true;
+					break;
+				}
 			}
 		}
-		else
-		{
+		if (!seen)
 			uniqueHits.push_back(hit);
-		}
 	}
 
 	tmax -= margin;

@@ -8,7 +8,7 @@ CollisionHitList TraceRayModel::Trace(UModel* model, const dvec3& origin, double
 	Model = model;
 	CollisionHitList hits;
 	Trace(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes.front(), hits, 0.0, tmax);
-	std::stable_sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) { return a.Fraction < b.Fraction; });
+	hits.SortByFraction();
 	return hits;
 }
 

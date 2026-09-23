@@ -8,7 +8,7 @@ CollisionHitList TraceAABBModel::Trace(UModel* model, const dvec3& origin, doubl
 	Model = model;
 	CollisionHitList hits;
 	Trace(origin, tmin, dirNormalized, tmax, extents, visibilityOnly, &Model->Nodes.front(), hits);
-	std::stable_sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) { return a.Fraction < b.Fraction; });
+	hits.SortByFraction();
 	return hits;
 }
 

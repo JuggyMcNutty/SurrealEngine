@@ -421,10 +421,17 @@ CollisionHit UActor::TryMove(const vec3& delta, bool dryRun, bool isOwnBaseBlock
 	return FinishMove(delta, hits, blockingHit);
 }
 
+bool UActor::IsPlayerOrProjectile()
+{
+	if (Collision.PlayerOrProjectile < 0)
+		Collision.PlayerOrProjectile = (UObject::TryCast<UPlayerPawn>(this) || UObject::TryCast<UProjectile>(this)) ? 1 : 0;
+	return Collision.PlayerOrProjectile != 0;
+}
+
 CollisionHit UActor::TraceMove(const vec3& delta, bool isOwnBaseBlocking, CollisionHitList& hits)
 {
 	// Analyze what we will hit if we move as requested and stop if it is the level or a blocking actor
-	bool useBlockPlayers = UObject::TryCast<UPlayerPawn>(this) || UObject::TryCast<UProjectile>(this);
+	bool useBlockPlayers = IsPlayerOrProjectile();
 	CollisionHit blockingHit;
 	if (!Brush())
 	{
@@ -436,7 +443,7 @@ CollisionHit UActor::TraceMove(const vec3& delta, bool isOwnBaseBlocking, Collis
 				if (hit.Actor)
 				{
 					bool isBlocking;
-					if (useBlockPlayers || UObject::TryCast<UPlayerPawn>(hit.Actor) || UObject::TryCast<UProjectile>(hit.Actor))
+					if (useBlockPlayers || hit.Actor->IsPlayerOrProjectile())
 						isBlocking = hit.Actor->bBlockPlayers() && bBlockPlayers();
 					else
 						isBlocking = hit.Actor->bBlockActors() && bBlockActors();
@@ -461,7 +468,7 @@ CollisionHit UActor::TraceMove(const vec3& delta, bool isOwnBaseBlocking, Collis
 
 CollisionHit UActor::FinishMove(const vec3& delta, const CollisionHitList& hits, CollisionHit blockingHit)
 {
-	bool useBlockPlayers = UObject::TryCast<UPlayerPawn>(this) || UObject::TryCast<UProjectile>(this);
+	bool useBlockPlayers = IsPlayerOrProjectile();
 
 	vec3 actuallyMoved = delta * blockingHit.Fraction;
 	vec3 OldLocation = Location();
@@ -489,7 +496,7 @@ CollisionHit UActor::FinishMove(const vec3& delta, const CollisionHitList& hits,
 				continue;
 
 			bool isBlocking;
-			if (useBlockPlayers || UObject::TryCast<UPlayerPawn>(actor) || UObject::TryCast<UProjectile>(actor))
+			if (useBlockPlayers || actor->IsPlayerOrProjectile())
 				isBlocking = actor->bBlockPlayers() && bBlockPlayers();
 			else
 				isBlocking = actor->bBlockActors() && bBlockActors();
@@ -516,7 +523,7 @@ CollisionHit UActor::FinishMove(const vec3& delta, const CollisionHitList& hits,
 				continue;
 
 			bool isBlocking;
-			if (useBlockPlayers || UObject::TryCast<UPlayerPawn>(actor) || UObject::TryCast<UProjectile>(actor))
+			if (useBlockPlayers || actor->IsPlayerOrProjectile())
 				isBlocking = actor->bBlockPlayers() && bBlockPlayers();
 			else
 				isBlocking = actor->bBlockActors() && bBlockActors();
@@ -546,7 +553,7 @@ CollisionHit UActor::FinishMove(const vec3& delta, const CollisionHitList& hits,
 		{
 			// We can't touch stuff we are blocked by
 			bool isBlocking;
-			if (useBlockPlayers || UObject::TryCast<UPlayerPawn>(hit.Actor) || UObject::TryCast<UProjectile>(hit.Actor))
+			if (useBlockPlayers || hit.Actor->IsPlayerOrProjectile())
 				isBlocking = hit.Actor->bBlockPlayers() && bBlockPlayers();
 			else
 				isBlocking = hit.Actor->bBlockActors() && bBlockActors();
