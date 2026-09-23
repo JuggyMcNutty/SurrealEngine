@@ -761,8 +761,134 @@ void ExpressionEvaluator::Expr(ConstructExpression* expr)
 	Frame::ThrowException("Construct expression not implemented");
 }
 
+// The operators most script calls go to -- about 83% of the native calls on
+// Liberty Island, and natives are 84% of all calls -- evaluated here instead
+// of through Frame::Call, CallNative and a handler. Each does what its native
+// in NObject.cpp does, with the same conversions, after every argument has
+// been evaluated (in the caller's context), as the general path reads them.
+// A function is matched by its native index and its name, so a game whose
+// indexes differ keeps the general path.
+enum class FastOp
+{
+	None,
+	NotEqual_ObjectObject, EqualEqual_ObjectObject, Not_PreBool,
+	Less_IntInt, LessEqual_IntInt, Greater_IntInt, GreaterEqual_IntInt, EqualEqual_IntInt, NotEqual_IntInt,
+	Less_FloatFloat, LessEqual_FloatFloat, Greater_FloatFloat, GreaterEqual_FloatFloat, NotEqual_FloatFloat,
+	Add_FloatFloat, Subtract_FloatFloat, Multiply_FloatFloat, Divide_FloatFloat, Subtract_IntInt,
+	AddAdd_Int, AddEqual_IntInt, AddEqual_FloatFloat, SubtractEqual_FloatFloat,
+	EqualEqual_NameName, NotEqual_NameName
+};
+
+static FastOp FindFastOperator(UFunction* func)
+{
+	struct Entry { int index; const char* name; FastOp op; };
+	static const Entry entries[] =
+	{
+		{ 119, "NotEqual_ObjectObject", FastOp::NotEqual_ObjectObject },
+		{ 114, "EqualEqual_ObjectObject", FastOp::EqualEqual_ObjectObject },
+		{ 129, "Not_PreBool", FastOp::Not_PreBool },
+		{ 150, "Less_IntInt", FastOp::Less_IntInt },
+		{ 152, "LessEqual_IntInt", FastOp::LessEqual_IntInt },
+		{ 151, "Greater_IntInt", FastOp::Greater_IntInt },
+		{ 153, "GreaterEqual_IntInt", FastOp::GreaterEqual_IntInt },
+		{ 154, "EqualEqual_IntInt", FastOp::EqualEqual_IntInt },
+		{ 155, "NotEqual_IntInt", FastOp::NotEqual_IntInt },
+		{ 176, "Less_FloatFloat", FastOp::Less_FloatFloat },
+		{ 178, "LessEqual_FloatFloat", FastOp::LessEqual_FloatFloat },
+		{ 177, "Greater_FloatFloat", FastOp::Greater_FloatFloat },
+		{ 179, "GreaterEqual_FloatFloat", FastOp::GreaterEqual_FloatFloat },
+		{ 181, "NotEqual_FloatFloat", FastOp::NotEqual_FloatFloat },
+		{ 174, "Add_FloatFloat", FastOp::Add_FloatFloat },
+		{ 175, "Subtract_FloatFloat", FastOp::Subtract_FloatFloat },
+		{ 171, "Multiply_FloatFloat", FastOp::Multiply_FloatFloat },
+		{ 172, "Divide_FloatFloat", FastOp::Divide_FloatFloat },
+		{ 147, "Subtract_IntInt", FastOp::Subtract_IntInt },
+		{ 165, "AddAdd_Int", FastOp::AddAdd_Int },
+		{ 161, "AddEqual_IntInt", FastOp::AddEqual_IntInt },
+		{ 184, "AddEqual_FloatFloat", FastOp::AddEqual_FloatFloat },
+		{ 185, "SubtractEqual_FloatFloat", FastOp::SubtractEqual_FloatFloat },
+		{ 254, "EqualEqual_NameName", FastOp::EqualEqual_NameName },
+		{ 255, "NotEqual_NameName", FastOp::NotEqual_NameName },
+	};
+	if (AllFlags(func->FuncFlags, FunctionFlags::Native))
+	{
+		for (const Entry& entry : entries)
+		{
+			if (entry.index == func->NativeFuncIndex && func->Name == entry.name)
+				return entry.op;
+		}
+	}
+	return FastOp::None;
+}
+
+bool ExpressionEvaluator::CallFastOperator(UFunction* func, const Array<Expression*>& exprArgs)
+{
+	if (func->FastOperator < 0)
+		func->FastOperator = (int)FindFastOperator(func);
+	FastOp op = (FastOp)func->FastOperator;
+	size_t arity = (op == FastOp::Not_PreBool || op == FastOp::AddAdd_Int) ? 1 : 2;
+	if (op == FastOp::None || exprArgs.size() != arity || !Context)
+		return false;
+
+	UObject* context = Context;
+	Context = Self;
+	ExpressionValue a = Value(exprArgs[0]);
+	ExpressionValue b = arity == 2 ? Value(exprArgs[1]) : ExpressionValue();
+	Context = context;
+
+	try
+	{
+		switch (op)
+		{
+		default: break;
+		case FastOp::NotEqual_ObjectObject: *Out = ExpressionValue::BoolValue(a.ToObject() != b.ToObject()); break;
+		case FastOp::EqualEqual_ObjectObject: *Out = ExpressionValue::BoolValue(a.ToObject() == b.ToObject()); break;
+		case FastOp::Not_PreBool: *Out = ExpressionValue::BoolValue(!a.ToBool()); break;
+		case FastOp::Less_IntInt: *Out = ExpressionValue::BoolValue(a.ToInt() < b.ToInt()); break;
+		case FastOp::LessEqual_IntInt: *Out = ExpressionValue::BoolValue(a.ToInt() <= b.ToInt()); break;
+		case FastOp::Greater_IntInt: *Out = ExpressionValue::BoolValue(a.ToInt() > b.ToInt()); break;
+		case FastOp::GreaterEqual_IntInt: *Out = ExpressionValue::BoolValue(a.ToInt() >= b.ToInt()); break;
+		case FastOp::EqualEqual_IntInt: *Out = ExpressionValue::BoolValue(a.ToInt() == b.ToInt()); break;
+		case FastOp::NotEqual_IntInt: *Out = ExpressionValue::BoolValue(a.ToInt() != b.ToInt()); break;
+		case FastOp::Less_FloatFloat: *Out = ExpressionValue::BoolValue(a.ToFloat() < b.ToFloat()); break;
+		case FastOp::LessEqual_FloatFloat: *Out = ExpressionValue::BoolValue(a.ToFloat() <= b.ToFloat()); break;
+		case FastOp::Greater_FloatFloat: *Out = ExpressionValue::BoolValue(a.ToFloat() > b.ToFloat()); break;
+		case FastOp::GreaterEqual_FloatFloat: *Out = ExpressionValue::BoolValue(a.ToFloat() >= b.ToFloat()); break;
+		case FastOp::NotEqual_FloatFloat: *Out = ExpressionValue::BoolValue(a.ToFloat() != b.ToFloat()); break;
+		case FastOp::Add_FloatFloat: *Out = ExpressionValue::FloatValue(a.ToFloat() + b.ToFloat()); break;
+		case FastOp::Subtract_FloatFloat: *Out = ExpressionValue::FloatValue(a.ToFloat() - b.ToFloat()); break;
+		case FastOp::Multiply_FloatFloat: *Out = ExpressionValue::FloatValue(a.ToFloat() * b.ToFloat()); break;
+		case FastOp::Divide_FloatFloat: *Out = ExpressionValue::FloatValue(a.ToFloat() / b.ToFloat()); break;
+		case FastOp::Subtract_IntInt: *Out = ExpressionValue::IntValue(a.ToInt() - b.ToInt()); break;
+		case FastOp::AddAdd_Int: { int32_t& A = a.ToType<int32_t&>(); *Out = ExpressionValue::IntValue(A++); break; }
+		case FastOp::AddEqual_IntInt: { int32_t& A = a.ToType<int32_t&>(); int32_t B = b.ToInt(); *Out = ExpressionValue::IntValue(A += B); break; }
+		case FastOp::AddEqual_FloatFloat: { float& A = a.ToType<float&>(); float B = b.ToFloat(); *Out = ExpressionValue::FloatValue(A += B); break; }
+		case FastOp::SubtractEqual_FloatFloat: { float& A = a.ToType<float&>(); float B = b.ToFloat(); *Out = ExpressionValue::FloatValue(A -= B); break; }
+		case FastOp::EqualEqual_NameName: *Out = ExpressionValue::BoolValue(a.ToName() == b.ToName()); break;
+		case FastOp::NotEqual_NameName: *Out = ExpressionValue::BoolValue(a.ToName() != b.ToName()); break;
+		}
+		return true;
+	}
+	catch (...)
+	{
+	}
+
+	// A conversion failed before anything was changed. The general path makes
+	// the same conversions in the native's own frame, and reports and
+	// recovers exactly as it always has.
+	CallArguments args(CallArguments::Room(func, arity));
+	args.push_back(std::move(a));
+	if (arity == 2)
+		args.push_back(std::move(b));
+	*Out = Frame::Call(func, Context, args);
+	return true;
+}
+
 void ExpressionEvaluator::Call(UFunction* func, const Array<Expression*>& exprArgs)
 {
+	if (CallFastOperator(func, exprArgs))
+		return;
+
 	if (func->NativeFuncIndex == 130)
 	{
 		*Out = ExpressionValue::BoolValue(Value(exprArgs[0], Self).ToBool() && Value(exprArgs[1], Self).ToBool());

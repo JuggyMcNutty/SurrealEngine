@@ -146,6 +146,7 @@ private:
 	void Expr(ConstructExpression* expr) override;
 
 	void Call(UFunction* func, const Array<Expression*>& exprArgs);
+	bool CallFastOperator(UFunction* func, const Array<Expression*>& exprArgs);
 
 	ExpressionEvalResult& Result;
 	UObject* Self = nullptr;
