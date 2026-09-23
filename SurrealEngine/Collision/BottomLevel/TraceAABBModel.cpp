@@ -36,7 +36,15 @@ void TraceAABBModel::Trace(const dvec3& origin, double tmin, const dvec3& dirNor
 		if (cursor.ClipBoxPlanes(bbox))
 		{
 			// Grab the hull planes and flip the plane direction if the plane points in the wrong direction.
-			Array<dvec4> planes;
+			// On the stack for the usual hull: this runs for every hull a sweep reaches.
+			dvec4 planesInline[32];
+			Array<dvec4> planesHeap;
+			dvec4* planes = planesInline;
+			if (hullPlanesCount > 32)
+			{
+				planesHeap.resize(hullPlanesCount);
+				planes = planesHeap.data();
+			}
 			for (int i = 0; i < hullPlanesCount; i++)
 			{
 				int32_t hullIndex = hullIndexList[i];
@@ -44,7 +52,7 @@ void TraceAABBModel::Trace(const dvec3& origin, double tmin, const dvec3& dirNor
 				hullIndex = hullIndex & ~0x4000'0000;
 				BspNode* hullnode = &Model->Nodes[hullIndex];
 				dvec4 hullplane((double)hullnode->PlaneX, (double)hullnode->PlaneY, (double)hullnode->PlaneZ, (double)hullnode->PlaneW);
-				planes.push_back(hullFlip ? -hullplane : hullplane);
+				planes[i] = hullFlip ? -hullplane : hullplane;
 			}
 
 			// AABB/hull sweep test.

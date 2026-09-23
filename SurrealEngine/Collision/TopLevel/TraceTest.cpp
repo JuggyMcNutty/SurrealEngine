@@ -125,22 +125,51 @@ bool TraceTester::TraceAnyHit(vec3 from, vec3 to, UActor* tracingActor, bool tra
 	ivec3 end = GetRayEndExtents(from, to);
 	if (end.x - start.x < 100 && end.y - start.y < 100 && end.z - start.z < 100)
 	{
-		for (int z = start.z; z < end.z; z++)
+		// Only the cells the segment passes through, not every cell of its
+		// box: a long sight line's box is mostly cells it never enters, and an
+		// actor is in every cell its collision box touches, so these are all
+		// the actors it can hit. Slab by slab along the segment's longest
+		// axis, each slab's cells on the other two axes found from where the
+		// segment enters and leaves it, a unit wider each way.
+		vec3 delta = to - from;
+		vec3 absDelta = { std::abs(delta.x), std::abs(delta.y), std::abs(delta.z) };
+		int axis = absDelta.x >= absDelta.y ? (absDelta.x >= absDelta.z ? 0 : 2) : (absDelta.y >= absDelta.z ? 1 : 2);
+		for (int slab = start[axis]; slab < end[axis]; slab++)
 		{
-			for (int y = start.y; y < end.y; y++)
+			float tA = (slab * 256.0f - from[axis]) / delta[axis];
+			float tB = ((slab + 1) * 256.0f - from[axis]) / delta[axis];
+			float t0 = std::clamp(std::min(tA, tB), 0.0f, 1.0f);
+			float t1 = std::clamp(std::max(tA, tB), 0.0f, 1.0f);
+			ivec3 cellStart = start, cellEnd = end;
+			cellStart[axis] = slab;
+			cellEnd[axis] = slab + 1;
+			for (int a = 0; a < 3; a++)
 			{
-				for (int x = start.x; x < end.x; x++)
+				if (a == axis)
+					continue;
+				float c0 = from[a] + delta[a] * t0;
+				float c1 = from[a] + delta[a] * t1;
+				cellStart[a] = std::max((int)std::floor((std::min(c0, c1) - 1.0f) * (1.0f / 256.0f)), start[a]);
+				cellEnd[a] = std::min((int)std::floor((std::max(c0, c1) + 1.0f) * (1.0f / 256.0f)) + 1, end[a]);
+			}
+
+			for (int z = cellStart.z; z < cellEnd.z; z++)
+			{
+				for (int y = cellStart.y; y < cellEnd.y; y++)
 				{
-					for (UActor* actor : GetActors(x, y, z))
+					for (int x = cellStart.x; x < cellEnd.x; x++)
 					{
-						if (actor->Collision.CheckCounter != checkCounter)
+						for (UActor* actor : GetActors(x, y, z))
 						{
-							actor->Collision.CheckCounter = checkCounter;
-							if (actor != tracingActor && actor->bBlockActors())
+							if (actor->Collision.CheckCounter != checkCounter)
 							{
-								TraceActor(actor, origin, tmin, direction, tmax, 0.0, 0.0, traceActors, traceWorld, visibilityOnly, hits);
-								if (!hits.empty())
-									return true;
+								actor->Collision.CheckCounter = checkCounter;
+								if (actor != tracingActor && actor->bBlockActors())
+								{
+									TraceActor(actor, origin, tmin, direction, tmax, 0.0, 0.0, traceActors, traceWorld, visibilityOnly, hits);
+									if (!hits.empty())
+										return true;
+								}
 							}
 						}
 					}
