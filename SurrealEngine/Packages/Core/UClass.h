@@ -67,9 +67,9 @@ public:
 	UState* GetState(const NameString& name) { auto it = States.find(name); if (it != States.end()) return it->second; else return nullptr; }
 	std::map<NameString, UState*> States;
 
-	// ExpressionEvaluator's virtual function lookup: (state name, function
-	// name) compare indexes to the function found. Classes, states and their
-	// functions do not change once loaded.
+	// FindScriptFunction's answers, for virtual calls and events: (state
+	// name, function name) compare indexes to the function found, or null.
+	// Classes, states and their functions do not change once loaded.
 	std::unordered_map<uint64_t, UFunction*> VirtualFunctionCache;
 
 private:

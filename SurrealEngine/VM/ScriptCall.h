@@ -4,6 +4,7 @@
 
 class UObject;
 class UFunction;
+class UClass;
 
 enum class EventName
 {
@@ -41,6 +42,10 @@ ExpressionValue CallEvent(UObject* Context, EventName name, Array<ExpressionValu
 ExpressionValue CallEvent(UObject* Context, const NameString& name, Array<ExpressionValue> args = {});
 
 UFunction* FindEventFunction(UObject* Context, const NameString& name);
+
+// The function a call by name reaches: the state's, else the class's (the
+// search virtual calls and events make), remembered per class.
+UFunction* FindScriptFunction(UClass* cls, const NameString& stateName, const NameString& name);
 
 NameString ToNameString(EventName name);
 bool NameStringToEventName(const NameString& name, EventName& eventName);

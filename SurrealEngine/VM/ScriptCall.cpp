@@ -103,35 +103,46 @@ ExpressionValue CallEvent(UObject* Context, const NameString& name, Array<Expres
 
 UFunction* FindEventFunction(UObject* Context, const NameString& name)
 {
+	return FindScriptFunction(Context->Class, Context->GetStateName(), name);
+}
+
+static UFunction* SearchScriptFunction(UClass* contextClass, const NameString& stateName, const NameString& name)
+{
 	// Search states first
 
-	NameString stateName = Context->GetStateName();
-	if (!stateName.IsNone())
+	for (UClass* cls = contextClass; cls != nullptr; cls = static_cast<UClass*>(cls->BaseStruct))
 	{
-		for (UClass* cls = Context->Class; cls != nullptr; cls = static_cast<UClass*>(cls->BaseStruct))
+		UState* state = cls->GetState(stateName);
+		if (state)
 		{
-			UState* state = cls->GetState(stateName);
-			if (state)
-			{
-				UFunction* func = state->GetFunction(name);
-				if (func)
-				{
-					return func;
-				}
-			}
+			UFunction* func = state->GetFunction(name);
+			if (func)
+				return func;
 		}
 	}
 
 	// Search normal member functions next
 
-	for (UClass* cls = Context->Class; cls != nullptr; cls = static_cast<UClass*>(cls->BaseStruct))
+	for (UClass* cls = contextClass; cls != nullptr; cls = static_cast<UClass*>(cls->BaseStruct))
 	{
 		UFunction* func = cls->GetFunction(name);
 		if (func)
-		{
 			return func;
-		}
 	}
 
 	return nullptr;
+}
+
+UFunction* FindScriptFunction(UClass* cls, const NameString& stateName, const NameString& name)
+{
+	// The search walks the class hierarchy's maps, and the answer depends only
+	// on the class, the state and the name, none of which change once loaded.
+	// Misses are kept too: an event a class does not have is asked for often.
+	uint64_t key = (((uint64_t)(uint32_t)stateName.GetCompareIndex()) << 32) | (uint32_t)name.GetCompareIndex();
+	auto it = cls->VirtualFunctionCache.find(key);
+	if (it != cls->VirtualFunctionCache.end())
+		return it->second;
+	UFunction* func = SearchScriptFunction(cls, stateName, name);
+	cls->VirtualFunctionCache[key] = func;
+	return func;
 }

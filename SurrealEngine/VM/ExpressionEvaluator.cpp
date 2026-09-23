@@ -8,6 +8,7 @@
 #include "Engine.h"
 #include "Package/PackageManager.h"
 #include "Packages/Core/UFunction.h"
+#include "ScriptCall.h"
 
 ExpressionEvalResult ExpressionEvaluator::Eval(Expression* expr, UObject* self, UObject* context, void* localVariables)
 {
@@ -666,59 +667,13 @@ void ExpressionEvaluator::Expr(DynArrayToIntExpression* expr)
 	*Out = ExpressionValue::IntValue((int)count);
 }
 
-static UFunction* FindVirtualFunction(UClass* contextClass, const NameString& stateName, const NameString& name)
-{
-	// Search states first
-
-	for (UClass* cls = contextClass; cls != nullptr; cls = static_cast<UClass*>(cls->BaseStruct))
-	{
-		UState* state = cls->GetState(stateName);
-		if (state)
-		{
-			UFunction* func = state->GetFunction(name);
-			if (func)
-				return func;
-		}
-	}
-
-	// Search normal member functions next
-
-	for (UClass* cls = contextClass; cls != nullptr; cls = static_cast<UClass*>(cls->BaseStruct))
-	{
-		for (UField* field = cls->Children; field != nullptr; field = field->Next)
-		{
-			UFunction* func = UObject::TryCast<UFunction>(field);
-			if (func && func->Name == name)
-				return func;
-		}
-	}
-
-	return nullptr;
-}
-
 void ExpressionEvaluator::Expr(VirtualFunctionExpression* expr)
 {
 	UClass* contextClass = UObject::TryCast<UClass>(Context);
 	if (!contextClass)
 		contextClass = Context->Class;
 
-	// The search walks the class hierarchy and casts every field on the way, so
-	// remember what it found for this class, state and name.
-	NameString stateName = Context->GetStateName();
-	uint64_t key = (((uint64_t)(uint32_t)stateName.GetCompareIndex()) << 32) | (uint32_t)expr->Name.GetCompareIndex();
-	UFunction* func = nullptr;
-	auto it = contextClass->VirtualFunctionCache.find(key);
-	if (it != contextClass->VirtualFunctionCache.end())
-	{
-		func = it->second;
-	}
-	else
-	{
-		func = FindVirtualFunction(contextClass, stateName, expr->Name);
-		if (func)
-			contextClass->VirtualFunctionCache[key] = func;
-	}
-
+	UFunction* func = FindScriptFunction(contextClass, Context->GetStateName(), expr->Name);
 	if (func)
 		Call(func, expr->Args);
 	else
