@@ -57,6 +57,16 @@ public:
 		EqualEqual_NameName, NotEqual_NameName
 	};
 	TypedKind Typed = TypedKind::Unknown;
+
+	// How Frame::Run runs this node as a statement: the commonest kinds in
+	// place (Frame::RunInPlace), without the ExpressionEvalResult
+	// ExpressionEvaluator::Eval makes; decided when first run
+	// (Frame::ClassifyStatement).
+	enum class StatementKind : uint8_t
+	{
+		Unknown, General, Jump, JumpIfNot, Let, LetBool, Call, ReturnNothing, IteratorNext
+	};
+	StatementKind Statement = StatementKind::Unknown;
 };
 
 class LocalVariableExpression : public Expression
@@ -117,6 +127,7 @@ public:
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	uint16_t Offset = 0;
+	int Target = -1; // Offset's statement index (Frame::ClassifyStatement)
 };
 
 class JumpIfNotExpression : public Expression
@@ -125,6 +136,7 @@ public:
 	void Visit(ExpressionVisitor* visitor) override { visitor->Expr(this); }
 
 	uint16_t Offset = 0;
+	int Target = -1; // Offset's statement index (Frame::ClassifyStatement)
 	Expression* Condition = nullptr;
 };
 

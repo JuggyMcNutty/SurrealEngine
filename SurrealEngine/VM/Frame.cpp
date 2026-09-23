@@ -2,6 +2,7 @@
 #include "Precomp.h"
 #include "Frame.h"
 #include "Bytecode.h"
+#include "Expression.h"
 #include "ExpressionEvaluator.h"
 #include "NativeFunc.h"
 #include "Packages/Core/UTextBuffer.h"
@@ -504,6 +505,76 @@ ExpressionEvalResult Frame::Run()
 		}
 
 		Expression* statement = Func->Code->Statements[curStatementIndex];
+		if (statement->Statement == Expression::StatementKind::Unknown)
+			ClassifyStatement(statement, *Func->Code);
+
+		// The commonest statements -- conditions, jumps, assignments to plain
+		// variables, calls, return;, the next pass of a foreach -- run in
+		// place, without the ExpressionEvalResult Eval makes for each; the
+		// general path below does the same with each one's result. Only this
+		// object's state frame can lose its Func or wait on a latent function,
+		// and what its Run returns is not used.
+		if (statement->Statement != Expression::StatementKind::General && Breakpoints.empty())
+		{
+			switch (statement->Statement)
+			{
+			default:
+				break;
+			case Expression::StatementKind::Jump:
+				StatementIndex = static_cast<JumpExpression*>(statement)->Target;
+				break;
+			case Expression::StatementKind::JumpIfNot:
+				{
+					auto jump = static_cast<JumpIfNotExpression*>(statement);
+					UStruct* func = Func;
+					bool taken = !ExpressionEvaluator::Condition(jump, Object, Variables.Data);
+					if (!Func)
+						return {};
+					// A GotoState in the condition moves the frame to other code
+					if (taken)
+						StatementIndex = Func == func ? jump->Target : Func->Code->FindStatementIndex(jump->Offset);
+					break;
+				}
+			case Expression::StatementKind::Let:
+				ExpressionEvaluator::Assignment(static_cast<LetExpression*>(statement)->LeftSide, static_cast<LetExpression*>(statement)->RightSide, Object, Variables.Data);
+				if (!Func)
+					return {};
+				break;
+			case Expression::StatementKind::LetBool:
+				ExpressionEvaluator::Assignment(static_cast<LetBoolExpression*>(statement)->LeftSide, static_cast<LetBoolExpression*>(statement)->RightSide, Object, Variables.Data);
+				if (!Func)
+					return {};
+				break;
+			case Expression::StatementKind::Call:
+				ExpressionEvaluator::CallStatement(statement, Object, Variables.Data);
+				if (!Func)
+					return {};
+				break;
+			case Expression::StatementKind::ReturnNothing:
+				{
+					if (RunState == FrameRunState::StepOut && StepFrame == this)
+						StepFrame = nullptr;
+					ExpressionEvalResult result;
+					result.Result = StatementResult::Return;
+					return result;
+				}
+			case Expression::StatementKind::IteratorNext:
+				if (Iterators.empty())
+					ThrowException("Iterator next statement without an iterator in " + Object->Name.ToString() + "." + Func->Name.ToString());
+				if (Iterators.back()->Next())
+					StatementIndex = Iterators.back()->StartStatementIndex;
+				else
+					StatementIndex = Iterators.back()->EndStatementIndex;
+				break;
+			}
+
+			if (Object->StateFrame.get() == this && LatentState != LatentRunState::Continue)
+				return {};
+
+			instructionsRetired++;
+			continue;
+		}
+
 		ExpressionEvalResult result = ExpressionEvaluator::Eval(statement, Object, Object, Variables.Data);
 		if (!Func)
 			return result;
@@ -610,6 +681,46 @@ ExpressionEvalResult Frame::Run()
 
 		instructionsRetired++;
 	}
+}
+
+void Frame::ClassifyStatement(Expression* statement, const Bytecode& code)
+{
+	Expression::StatementKind kind = Expression::StatementKind::General;
+	if (auto jump = dynamic_cast<JumpExpression*>(statement))
+	{
+		jump->Target = code.FindStatementIndex(jump->Offset);
+		kind = Expression::StatementKind::Jump;
+	}
+	else if (auto jumpIfNot = dynamic_cast<JumpIfNotExpression*>(statement))
+	{
+		jumpIfNot->Target = code.FindStatementIndex(jumpIfNot->Offset);
+		kind = Expression::StatementKind::JumpIfNot;
+	}
+	else if (auto let = dynamic_cast<LetExpression*>(statement))
+	{
+		if (ExpressionEvaluator::IsAssignable(let->LeftSide))
+			kind = Expression::StatementKind::Let;
+	}
+	else if (auto letBool = dynamic_cast<LetBoolExpression*>(statement))
+	{
+		if (ExpressionEvaluator::IsAssignable(letBool->LeftSide))
+			kind = Expression::StatementKind::LetBool;
+	}
+	else if (dynamic_cast<VirtualFunctionExpression*>(statement) || dynamic_cast<FinalFunctionExpression*>(statement) ||
+		dynamic_cast<GlobalFunctionExpression*>(statement) || dynamic_cast<NativeFunctionExpression*>(statement))
+	{
+		kind = Expression::StatementKind::Call;
+	}
+	else if (auto ret = dynamic_cast<ReturnExpression*>(statement))
+	{
+		if (ret->Value && dynamic_cast<NothingExpression*>(ret->Value))
+			kind = Expression::StatementKind::ReturnNothing;
+	}
+	else if (dynamic_cast<IteratorNextExpression*>(statement))
+	{
+		kind = Expression::StatementKind::IteratorNext;
+	}
+	statement->Statement = kind;
 }
 
 void Frame::ProcessSwitch(const ExpressionValue& condition)

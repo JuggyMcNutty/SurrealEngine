@@ -186,6 +186,7 @@ public:
 private:
 	ExpressionEvalResult Run();
 	void ProcessSwitch(const ExpressionValue& condition);
+	static void ClassifyStatement(Expression* statement, const Bytecode& code);
 
 	static ExpressionValue CallNative(UFunction* func, UObject* instance, CallArguments& args);
 	static ExpressionValue CallScript(UFunction* func, UObject* instance, CallArguments& args);

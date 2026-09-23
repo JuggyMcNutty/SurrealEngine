@@ -37,9 +37,23 @@ public:
 	// Evaluates a statement: its value, and what the frame does next
 	static ExpressionEvalResult Eval(Expression* expr, UObject* self, UObject* context, void* localVariables);
 
+	// Frame::RunInPlace's statements: JumpIfNot's condition, an assignment to
+	// a variable kind (Let, LetBool), a call whose value is dropped. Each
+	// reports nothing to the frame but whether JumpIfNot jumps.
+	static bool Condition(JumpIfNotExpression* statement, UObject* self, void* localVariables);
+	static void Assignment(Expression* lhs, Expression* rhs, UObject* self, void* localVariables);
+	static void CallStatement(Expression* statement, UObject* self, void* localVariables);
+	static bool IsAssignable(Expression* lhs); // Assign takes it
+
 private:
 	ExpressionEvaluator(ExpressionEvalResult& result, UObject* self, UObject* context, void* localVariables)
 		: Result(result), Self(self), Context(context), LocalVariables(localVariables), Out(&result.Value) {}
+
+	// A statement run in place: nothing it evaluates is the statement's own
+	// value (IsStatement is false throughout), so NoResult is never written
+	ExpressionEvaluator(UObject* self, void* localVariables)
+		: Result(NoResult), Self(self), Context(self), LocalVariables(localVariables), Out(nullptr) {}
+	static ExpressionEvalResult NoResult;
 
 	// A nested expression's value, from this same evaluator. Only the statement
 	// says what the frame does next: whatever else a nested expression reports

@@ -12,6 +12,11 @@
 
 using TypedKind = Expression::TypedKind;
 
+static bool IsVariable(TypedKind kind)
+{
+	return kind >= TypedKind::LocalByte && kind <= TypedKind::InstanceBoolVariable;
+}
+
 ExpressionEvalResult ExpressionEvaluator::Eval(Expression* expr, UObject* self, UObject* context, void* localVariables)
 {
 	auto oldExpr = Frame::StepExpression;
@@ -31,6 +36,36 @@ ExpressionEvalResult ExpressionEvaluator::Eval(Expression* expr, UObject* self, 
 	expr->Visit(&evaluator);
 	Frame::StepExpression = oldExpr;
 	return result;
+}
+
+ExpressionEvalResult ExpressionEvaluator::NoResult;
+
+bool ExpressionEvaluator::Condition(JumpIfNotExpression* statement, UObject* self, void* localVariables)
+{
+	ExpressionEvaluator evaluator(self, localVariables);
+	return evaluator.EvalBool(statement->Condition);
+}
+
+void ExpressionEvaluator::Assignment(Expression* lhs, Expression* rhs, UObject* self, void* localVariables)
+{
+	ExpressionEvaluator evaluator(self, localVariables);
+	evaluator.Assign(lhs, rhs);
+}
+
+void ExpressionEvaluator::CallStatement(Expression* statement, UObject* self, void* localVariables)
+{
+	// No call's Expr reports anything to the frame: only its value, dropped
+	ExpressionEvaluator evaluator(self, localVariables);
+	ExpressionValue value;
+	evaluator.Out = &value;
+	statement->Visit(&evaluator);
+}
+
+bool ExpressionEvaluator::IsAssignable(Expression* lhs)
+{
+	if (lhs->Typed == TypedKind::Unknown)
+		Classify(lhs);
+	return IsVariable(lhs->Typed);
 }
 
 ExpressionValue ExpressionEvaluator::Value(Expression* expr)
@@ -918,11 +953,6 @@ void ExpressionEvaluator::Expr(FunctionArgumentsExpression* expr)
 // the general path would have caught it. And the general path reads every
 // operand once all of them are evaluated, so a variable operand is read after
 // the operand after it is evaluated (which might change it).
-
-static bool IsVariable(TypedKind kind)
-{
-	return kind >= TypedKind::LocalByte && kind <= TypedKind::InstanceBoolVariable;
-}
 
 // The type of value a typed kind yields; Nothing for Generic
 static ExpressionValueType TypedValueType(TypedKind kind)
