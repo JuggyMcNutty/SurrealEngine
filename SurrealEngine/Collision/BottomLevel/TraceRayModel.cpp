@@ -7,7 +7,7 @@ CollisionHitList TraceRayModel::Trace(UModel* model, const dvec3& origin, double
 {
 	Model = model;
 	CollisionHitList hits;
-	Trace(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes.front(), hits);
+	Trace(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes.front(), hits, 0.0, tmax);
 	std::stable_sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) { return a.Fraction < b.Fraction; });
 	return hits;
 }
@@ -15,17 +15,54 @@ CollisionHitList TraceRayModel::Trace(UModel* model, const dvec3& origin, double
 bool TraceRayModel::TraceAnyHit(UModel* model, const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, bool visibilityOnly)
 {
 	Model = model;
-	return TraceAnyHit(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes.front());
+	return TraceAnyHit(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes.front(), 0.0, tmax);
 }
 
-void TraceRayModel::Trace(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, bool visibilityOnly, BspNode* node, CollisionHitList& hits)
+// The traversal handed both children of a plane the whole segment whenever it
+// touched their side, and a long sight line then touched both sides of
+// plane after plane further down. A child now gets only the part of the
+// segment [t0, t1] in its half-space, widened by SplitMargin units so that a
+// polygon whose edge lies on the plane is still reached from either side.
+// The old test stays too, so the nodes visited are a subset of those it
+// visited, in the same order.
+static const double SplitMargin = 1.0;
+
+static bool SegmentPart(double dA, double dB, double t0, double t1, double sign, double& p0, double& p1)
+{
+	// The part where sign * distance >= -SplitMargin
+	double a = sign * dA + SplitMargin, b = sign * dB + SplitMargin;
+	if (a < 0.0 && b < 0.0)
+		return false;
+	if (a >= 0.0 && b >= 0.0)
+	{
+		p0 = t0;
+		p1 = t1;
+	}
+	else
+	{
+		double ts = t0 + (t1 - t0) * (a / (a - b));
+		if (a >= 0.0)
+		{
+			p0 = t0;
+			p1 = ts;
+		}
+		else
+		{
+			p0 = ts;
+			p1 = t1;
+		}
+	}
+	return true;
+}
+
+void TraceRayModel::Trace(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, bool visibilityOnly, BspNode* node, CollisionHitList& hits, double t0, double t1)
 {
 	BspNode* polynode = node;
 	while (true)
 	{
 		if (!visibilityOnly || (polynode->NodeFlags & NF_NotVisBlocking) == 0)
 		{
-			double t = NodeRayIntersect(origin, tmin, dirNormalized, tmax, polynode);
+			double t = NodeRayIntersect(origin, tmin, dirNormalized, tmax, polynode, t0, t1);
 			if (t >= tmin && t < tmax)
 			{
 				CollisionHit hit = { (float)t, vec3(node->PlaneX, node->PlaneY, node->PlaneZ), nullptr, polynode, node };
@@ -43,20 +80,23 @@ void TraceRayModel::Trace(const dvec3& origin, double tmin, const dvec3& dirNorm
 	double fromSide = dot(dvec4(origin, 1.0), plane);
 	double toSide = dot(dvec4(origin + dirNormalized * tmax, 1.0), plane);
 
-	if (node->Front >= 0 && (fromSide >= 0.0 || toSide >= 0.0))
-		Trace(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Front], hits);
-	if (node->Back >= 0 && (fromSide <= 0.0 || toSide <= 0.0))
-		Trace(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Back], hits);
+	double dA = dot(dvec4(origin + dirNormalized * t0, 1.0), plane);
+	double dB = dot(dvec4(origin + dirNormalized * t1, 1.0), plane);
+	double p0, p1;
+	if (node->Front >= 0 && (fromSide >= 0.0 || toSide >= 0.0) && SegmentPart(dA, dB, t0, t1, 1.0, p0, p1))
+		Trace(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Front], hits, p0, p1);
+	if (node->Back >= 0 && (fromSide <= 0.0 || toSide <= 0.0) && SegmentPart(dA, dB, t0, t1, -1.0, p0, p1))
+		Trace(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Back], hits, p0, p1);
 }
 
-bool TraceRayModel::TraceAnyHit(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, bool visibilityOnly, BspNode* node)
+bool TraceRayModel::TraceAnyHit(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, bool visibilityOnly, BspNode* node, double t0, double t1)
 {
 	BspNode* polynode = node;
 	while (true)
 	{
 		if (!visibilityOnly || (polynode->NodeFlags & NF_NotVisBlocking) == 0)
 		{
-			double t = NodeRayIntersect(origin, tmin, dirNormalized, tmax, polynode);
+			double t = NodeRayIntersect(origin, tmin, dirNormalized, tmax, polynode, t0, t1);
 			if (t >= tmin && t < tmax)
 				return true;
 		}
@@ -69,15 +109,18 @@ bool TraceRayModel::TraceAnyHit(const dvec3& origin, double tmin, const dvec3& d
 	double fromSide = dot(dvec4(origin, 1.0), plane);
 	double toSide = dot(dvec4(origin + dirNormalized * tmax, 1.0), plane);
 
-	if (node->Front >= 0 && (fromSide >= 0.0 || toSide >= 0.0) && TraceAnyHit(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Front]))
+	double dA = dot(dvec4(origin + dirNormalized * t0, 1.0), plane);
+	double dB = dot(dvec4(origin + dirNormalized * t1, 1.0), plane);
+	double p0, p1;
+	if (node->Front >= 0 && (fromSide >= 0.0 || toSide >= 0.0) && SegmentPart(dA, dB, t0, t1, 1.0, p0, p1) && TraceAnyHit(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Front], p0, p1))
 		return true;
-	else if (node->Back >= 0 && (fromSide <= 0.0 || toSide <= 0.0) && TraceAnyHit(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Back]))
+	else if (node->Back >= 0 && (fromSide <= 0.0 || toSide <= 0.0) && SegmentPart(dA, dB, t0, t1, -1.0, p0, p1) && TraceAnyHit(origin, tmin, dirNormalized, tmax, visibilityOnly, &Model->Nodes[node->Back], p0, p1))
 		return true;
 	else
 		return false;
 }
 
-double TraceRayModel::NodeRayIntersect(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, BspNode* node)
+double TraceRayModel::NodeRayIntersect(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, BspNode* node, double t0, double t1)
 {
 	if (node->NumVertices < 3 || (node->Surf >= 0 && Model->Surfaces[node->Surf].PolyFlags & PF_NotSolid))
 		return tmax;
@@ -87,6 +130,13 @@ double TraceRayModel::NodeRayIntersect(const dvec3& origin, double tmin, const d
 	double fromSide = dot(dvec4(origin, 1.0), plane);
 	double toSide = dot(dvec4(origin + dirNormalized * tmax, 1.0), plane);
 	if ((fromSide > 0.0 && toSide > 0.0) || (fromSide < 0.0 && toSide < 0.0))
+		return tmax;
+
+	// A hit lies in the node's own part of the segment, [t0, t1]: when that
+	// stays clear of the plane (by more than SplitMargin), there is none.
+	double partA = dot(dvec4(origin + dirNormalized * t0, 1.0), plane);
+	double partB = dot(dvec4(origin + dirNormalized * t1, 1.0), plane);
+	if ((partA > SplitMargin && partB > SplitMargin) || (partA < -SplitMargin && partB < -SplitMargin))
 		return tmax;
 
 	BspVert* v = &Model->Vertices[node->VertPool];
