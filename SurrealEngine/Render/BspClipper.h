@@ -26,6 +26,12 @@ public:
 	BspClipper();
 	~BspClipper();
 
+	// The occlusion grid's size. Its cost is per row, so it follows the image
+	// being drawn (VisibleFrame::Process) rather than a fixed 1080 rows:
+	// capped at MaxWidth x MaxHeight, which is what it always was.
+	void SetViewportSize(int width, int height);
+	enum { MaxWidth = 2048, MaxHeight = 1080 };
+
 	void Setup(const mat4& world_to_projection, const Array<PortalSpan>& portalSpans, const vec4& portalPlane);
 
 	bool CheckSurface(const vec3* vertices, uint32_t count, bool solid);
@@ -68,6 +74,6 @@ private:
 	float weightsbuffer[max_additional_vertices * 3 * 2];
 	float* weights = nullptr;
 
-	const int ViewportWidth = 2048;
-	const int ViewportHeight = 1080;
+	int ViewportWidth = MaxWidth;
+	int ViewportHeight = MaxHeight;
 };

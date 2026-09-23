@@ -16,6 +16,14 @@ BspClipper::~BspClipper()
 {
 }
 
+void BspClipper::SetViewportSize(int width, int height)
+{
+	ViewportWidth = std::clamp(width, 1, (int)MaxWidth);
+	ViewportHeight = std::clamp(height, 1, (int)MaxHeight);
+	if ((int)Viewport.size() != ViewportHeight)
+		Viewport.resize(ViewportHeight);
+}
+
 void BspClipper::Setup(const mat4& world_to_projection, const Array<PortalSpan>& portalSpans, const vec4& portalPlane)
 {
 	WorldToProjection = world_to_projection;
