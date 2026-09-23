@@ -45,4 +45,8 @@ public:
 	uint16_t ReplicationOffset = 0;
 
 	UStruct* NativeStruct = nullptr;
+
+	// Frame::Call's NameStringToEventName(Name), done once: the EventName, or
+	// -1 when the function is not an event, or -2 before the first call.
+	int EventIndex = -2;
 };

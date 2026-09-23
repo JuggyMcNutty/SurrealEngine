@@ -311,6 +311,8 @@ public:
 
 	bool IsEventEnabled(const NameString& name) const;
 	bool IsEventEnabled(EventName name) const;
+	// IsEventEnabled for a name already known not to be an EventName
+	bool IsNonEventEnabled(const NameString& name) const;
 	bool IsEventDisabled(EventName name) const;
 
 	void EnableEvent(const NameString& name)

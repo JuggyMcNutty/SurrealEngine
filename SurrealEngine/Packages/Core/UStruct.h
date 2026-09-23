@@ -39,6 +39,10 @@ public:
 	size_t StructSize = 0;
 	Array<UProperty*> Properties;
 
+	// LocalVariables: 1 if every property is plain data (zero-filled, nothing
+	// to destruct), 0 if not, -1 before the first frame of this struct.
+	int PlainDataLocals = -1;
+
 	int GetStatementLine(Expression* statement);
 	FunctionDebugInfo* GetDebugInfo();
 

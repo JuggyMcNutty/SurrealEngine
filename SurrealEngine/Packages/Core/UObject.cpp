@@ -376,10 +376,15 @@ bool UObject::IsEventEnabled(const NameString& name) const
 	}
 	else
 	{
-		NameString stateName = GetStateName();
-		auto it = DisabledEvents.find(stateName);
-		return it == DisabledEvents.end() || it->second.find(name) == it->second.end();
+		return IsNonEventEnabled(name);
 	}
+}
+
+bool UObject::IsNonEventEnabled(const NameString& name) const
+{
+	NameString stateName = GetStateName();
+	auto it = DisabledEvents.find(stateName);
+	return it == DisabledEvents.end() || it->second.find(name) == it->second.end();
 }
 
 bool UObject::IsEventEnabled(EventName name) const

@@ -83,6 +83,11 @@ public:
 
 	Frame(UObject* instance, UStruct* func);
 
+	// A native function's place on the call stack. Natives take their
+	// arguments directly and never Run, so there are no locals to allocate.
+	struct NoLocals {};
+	Frame(UObject* instance, UStruct* func, NoLocals) : Object(instance), Func(func) {}
+
 	void SetState(UStruct* func);
 
 	void GotoLabel(const NameString& label);

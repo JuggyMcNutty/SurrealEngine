@@ -6,6 +6,15 @@
 #include "NativeFunc.h"
 #include "Packages/Core/UTextBuffer.h"
 #include "Packages/Core/UFunction.h"
+#include "VM/ScriptCall.h"
+#include "Packages/Core/Properties/UByteProperty.h"
+#include "Packages/Core/Properties/UIntProperty.h"
+#include "Packages/Core/Properties/UFloatProperty.h"
+#include "Packages/Core/Properties/UBoolProperty.h"
+#include "Packages/Core/Properties/UNameProperty.h"
+#include "Packages/Core/Properties/UObjectProperty.h"
+#include "Packages/Core/Properties/UPointerProperty.h"
+#include "Packages/Core/Properties/UStructProperty.h"
 #include "Packages/Engine/Subsystems/USurrealAudioDevice.h"
 #include "Engine.h"
 #include "Package/PackageManager.h"
@@ -210,7 +219,14 @@ ExpressionValue Frame::Call(UFunction* func, UObject* instance, Array<Expression
 
 	TraceCall(func, instance, args);
 
-	if (!instance->IsEventEnabled(func->Name))
+	// Whether func is an event is a property of its name: look it up once
+	if (func->EventIndex == -2)
+	{
+		EventName eventName = {};
+		func->EventIndex = NameStringToEventName(func->Name, eventName) ? (int)eventName : -1;
+	}
+	bool enabled = func->EventIndex >= 0 ? instance->IsEventEnabled((EventName)func->EventIndex) : instance->IsNonEventEnabled(func->Name);
+	if (!enabled)
 	{
 		return ExpressionValue::NothingValue();
 	}
@@ -307,7 +323,7 @@ ExpressionValue Frame::CallNative(UFunction* func, UObject* instance, Array<Expr
 		auto& callback = NativeFunctions::NativeByIndex[func->NativeFuncIndex];
 		if (callback)
 		{
-			Frame frame(instance, func);
+			Frame frame(instance, func, Frame::NoLocals());
 			ActiveCallStackFrame activeFrame(&frame);
 			try
 			{
@@ -334,7 +350,7 @@ ExpressionValue Frame::CallNative(UFunction* func, UObject* instance, Array<Expr
 		auto& callback = NativeFunctions::NativeByName[{ func->Name, func->NativeStruct->Name }];
 		if (callback)
 		{
-			Frame frame(instance, func);
+			Frame frame(instance, func, Frame::NoLocals());
 			ActiveCallStackFrame activeFrame(&frame);
 			try
 			{
@@ -617,22 +633,56 @@ void Frame::ProcessSwitch(const ExpressionValue& condition)
 
 /////////////////////////////////////////////////////////////////////////////
 
+// Whether every property of s constructs to zero bytes and has nothing to
+// destruct: numbers, bools, names, object references, and structs of those.
+static bool IsPlainData(UStruct* s)
+{
+	for (UProperty* prop : s->Properties)
+	{
+		if (UStructProperty* structProp = UObject::TryCast<UStructProperty>(prop))
+		{
+			if (!structProp->Struct || !IsPlainData(structProp->Struct))
+				return false;
+		}
+		else if (!UObject::TryCast<UByteProperty>(prop) && !UObject::TryCast<UIntProperty>(prop) &&
+			!UObject::TryCast<UFloatProperty>(prop) && !UObject::TryCast<UBoolProperty>(prop) &&
+			!UObject::TryCast<UNameProperty>(prop) && !UObject::TryCast<UObjectProperty>(prop) &&
+			!UObject::TryCast<UPointerProperty>(prop))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 LocalVariables::LocalVariables(UStruct* func) : Func(func)
 {
 	if (func)
 	{
 		Data = AlignedAlloc(func->StructAlignment, func->StructSize);
 
-		for (UProperty* prop : func->Properties)
+		// Most functions' locals are plain data, and constructing them one
+		// virtual call at a time was a measurable part of every script call
+		if (func->PlainDataLocals < 0)
+			func->PlainDataLocals = IsPlainData(func) ? 1 : 0;
+
+		if (func->PlainDataLocals)
 		{
-			prop->ConstructArray(static_cast<uint8_t*>(Data) + prop->DataOffset.DataOffset);
+			memset(Data, 0, func->StructSize);
+		}
+		else
+		{
+			for (UProperty* prop : func->Properties)
+			{
+				prop->ConstructArray(static_cast<uint8_t*>(Data) + prop->DataOffset.DataOffset);
+			}
 		}
 	}
 }
 
 LocalVariables::~LocalVariables()
 {
-	if (Func && Data)
+	if (Func && Data && !Func->PlainDataLocals)
 	{
 		for (UProperty* prop : Func->Properties)
 		{
