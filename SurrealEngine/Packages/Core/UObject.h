@@ -317,8 +317,15 @@ public:
 
 	void EnableEvent(const NameString& name)
 	{
-		NameString stateName = GetStateName();
-		DisabledEvents[stateName].erase(name);
+		// A state with nothing disabled has no entry, so an object with nothing
+		// disabled anywhere has an empty DisabledEvents
+		auto it = DisabledEvents.find(GetStateName());
+		if (it != DisabledEvents.end())
+		{
+			it->second.erase(name);
+			if (it->second.empty())
+				DisabledEvents.erase(it);
+		}
 	}
 
 	void DisableEvent(const NameString& name)

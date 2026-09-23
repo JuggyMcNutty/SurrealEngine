@@ -774,14 +774,13 @@ void ExpressionEvaluator::Call(UFunction* func, const Array<Expression*>& exprAr
 	else
 	{
 		// Arguments are evaluated in the caller's own context; the call is made in this one
-		Array<ExpressionValue> args;
-		args.reserve(exprArgs.size());
+		CallArguments args(CallArguments::Room(func, exprArgs.size()));
 		UObject* context = Context;
 		Context = Self;
 		for (Expression* arg : exprArgs)
 			args.push_back(Value(arg));
 		Context = context;
-		*Out = Frame::Call(func, Context, std::move(args));
+		*Out = Frame::Call(func, Context, args);
 	}
 }
 

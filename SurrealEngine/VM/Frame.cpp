@@ -39,7 +39,7 @@ Frame::Frame(UObject* instance, UStruct* func)
 void Frame::SetState(UStruct* func)
 {
 	Func = func;
-	Variables = std::make_unique<LocalVariables>(func);
+	Variables.Init(func);
 }
 
 bool Frame::AddBreakpoint(const NameString& clsName, const NameString& funcName, const NameString& stateName, int statementIndex)
@@ -208,7 +208,38 @@ std::string Frame::GetCallstack()
 	return result;
 }
 
+const Array<UProperty*>& Frame::CallParms(UFunction* func)
+{
+	if (!func->CallParmsReady)
+	{
+		// A function's Properties are its UProperty children in order, collected at load
+		for (UProperty* prop : func->Properties)
+		{
+			if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
+				func->CallParms.push_back(prop);
+			if (!func->ReturnParm && AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::ReturnParm))
+				func->ReturnParm = prop;
+		}
+		func->CallParmsReady = true;
+	}
+	return func->CallParms;
+}
+
+size_t CallArguments::Room(UFunction* func, size_t passed)
+{
+	// Frame::Call adds optional parameters up to the last, then a native's return value
+	return std::max(passed, Frame::CallParms(func).size()) + 1;
+}
+
 ExpressionValue Frame::Call(UFunction* func, UObject* instance, Array<ExpressionValue> args)
+{
+	CallArguments callArgs(CallArguments::Room(func, args.size()));
+	for (ExpressionValue& arg : args)
+		callArgs.push_back(std::move(arg));
+	return Call(func, instance, callArgs);
+}
+
+ExpressionValue Frame::Call(UFunction* func, UObject* instance, CallArguments& args)
 {
 	if (!instance)
 	{
@@ -232,45 +263,30 @@ ExpressionValue Frame::Call(UFunction* func, UObject* instance, Array<Expression
 	}
 
 	// Trailing optional args may be missing. Add nothing values so the args list matches the function signature.
-	// (A function's Properties are its UProperty children in order, collected at load: no casting per call.)
-	int argindex = 0;
-	for (UProperty* prop : func->Properties)
-	{
-		if (argindex == args.size() && AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::OptionalParm))
-			args.push_back(ExpressionValue::NothingValue());
-
-		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
-			argindex++;
-	}
+	const Array<UProperty*>& parms = CallParms(func);
+	for (size_t i = args.size(); i < parms.size() && AllFlags(parms[i]->PropFlags, PropertyFlags::Parm | PropertyFlags::OptionalParm); i++)
+		args.push_back(ExpressionValue::NothingValue());
 
 	if (AllFlags(func->FuncFlags, FunctionFlags::Native))
 	{
-		return CallNative(func, instance, std::move(args));
+		return CallNative(func, instance, args);
 	}
 	else
 	{
-		return CallScript(func, instance, std::move(args));
+		return CallScript(func, instance, args);
 	}
 }
 
-ExpressionValue Frame::CallScript(UFunction* func, UObject* instance, Array<ExpressionValue> args)
+ExpressionValue Frame::CallScript(UFunction* func, UObject* instance, CallArguments& args)
 {
 	Frame frame(instance, func);
+	const Array<UProperty*>& parms = func->CallParms;
 
 	// Store args in function frame local variables
-	int argindex = 0;
-	for (UProperty* prop : func->Properties)
+	for (size_t i = 0; i < parms.size() && i < args.size(); i++)
 	{
-		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
-		{
-			if (argindex < args.size())
-			{
-				ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables->Data, prop);
-				lvalue.Store(args[argindex]);
-			}
-
-			argindex++;
-		}
+		ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables.Data, parms[i]);
+		lvalue.Store(args[i]);
 	}
 
 	// Run the function
@@ -280,43 +296,29 @@ ExpressionValue Frame::CallScript(UFunction* func, UObject* instance, Array<Expr
 	result.Load();
 
 	// Copy out params from frame local variables
-	argindex = 0;
-	for (UProperty* prop : func->Properties)
+	for (size_t i = 0; i < parms.size() && i < args.size(); i++)
 	{
-		if (AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::OutParm) && argindex < args.size())
+		if (AllFlags(parms[i]->PropFlags, PropertyFlags::OutParm))
 		{
-			ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables->Data, prop);
-			args[argindex].Store(lvalue);
+			ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables.Data, parms[i]);
+			args[i].Store(lvalue);
 		}
+	}
 
-		if (AllFlags(prop->PropFlags, PropertyFlags::ReturnParm) && result.GetType() == ExpressionValueType::Nothing)
-		{
-			result = ExpressionValue::DefaultValue(prop);
-		}
-
-		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
-			argindex++;
+	if (func->ReturnParm && result.GetType() == ExpressionValueType::Nothing)
+	{
+		result = ExpressionValue::DefaultValue(func->ReturnParm);
 	}
 
 	return result;
 }
 
-ExpressionValue Frame::CallNative(UFunction* func, UObject* instance, Array<ExpressionValue> args)
+ExpressionValue Frame::CallNative(UFunction* func, UObject* instance, CallArguments& args)
 {
 	// Native functions expect the last parameter to be the return value
-	bool returnparmfound = false;
-	int argindex = 0;
-	for (UProperty* prop : func->Properties)
-	{
-		if (AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::ReturnParm))
-		{
-			ExpressionValue retval = ExpressionValue::PropertyValue(prop);
-			args.push_back(std::move(retval));
-			returnparmfound = true;
-		}
-		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
-			argindex++;
-	}
+	bool returnparmfound = func->ReturnParm != nullptr;
+	if (returnparmfound)
+		args.push_back(ExpressionValue::PropertyValue(func->ReturnParm));
 
 	if (func->NativeFuncIndex != 0)
 	{
@@ -376,7 +378,7 @@ ExpressionValue Frame::CallNative(UFunction* func, UObject* instance, Array<Expr
 	return returnparmfound ? std::move(args.back()) : ExpressionValue::NothingValue();
 }
 
-void Frame::TraceCall(UFunction* func, UObject* instance, const Array<ExpressionValue>& args)
+void Frame::TraceCall(UFunction* func, UObject* instance, const CallArguments& args)
 {
 #if 0 // To do: create a commandlet that lets us do this
 	static NameString TraceActorClass = "CTFGame";
@@ -502,7 +504,7 @@ ExpressionEvalResult Frame::Run()
 		}
 
 		Expression* statement = Func->Code->Statements[curStatementIndex];
-		ExpressionEvalResult result = ExpressionEvaluator::Eval(statement, Object, Object, Variables->Data);
+		ExpressionEvalResult result = ExpressionEvaluator::Eval(statement, Object, Object, Variables.Data);
 		if (!Func)
 			return result;
 		switch (result.Result)
@@ -558,7 +560,7 @@ ExpressionEvalResult Frame::Run()
 					UProperty* prop = UObject::TryCast<UProperty>(field);
 					if (prop && AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::ReturnParm))
 					{
-						result.Value = ExpressionValue::Variable(Variables->Data, prop);
+						result.Value = ExpressionValue::Variable(Variables.Data, prop);
 						result.Value.Load();
 						break;
 					}
@@ -618,7 +620,7 @@ void Frame::ProcessSwitch(const ExpressionValue& condition)
 		CaseExpression* caseexpr = static_cast<CaseExpression*>(Func->Code->Statements[StatementIndex++]);
 		if (caseexpr->Value)
 		{
-			ExpressionValue casevalue = ExpressionEvaluator::Eval(caseexpr->Value, Object, Object, Variables->Data).Value;
+			ExpressionValue casevalue = ExpressionEvaluator::Eval(caseexpr->Value, Object, Object, Variables.Data).Value;
 			if (condition.IsEqual(casevalue))
 				break;
 			else
@@ -655,11 +657,16 @@ static bool IsPlainData(UStruct* s)
 	return true;
 }
 
-LocalVariables::LocalVariables(UStruct* func) : Func(func)
+void LocalVariables::Init(UStruct* func)
 {
+	Reset();
+	Func = func;
 	if (func)
 	{
-		Data = AlignedAlloc(func->StructAlignment, func->StructSize);
+		if (func->StructSize <= sizeof(Inline) && func->StructAlignment <= 16)
+			Data = Inline;
+		else
+			Data = AlignedAlloc(func->StructAlignment, func->StructSize);
 
 		// Most functions' locals are plain data, and constructing them one
 		// virtual call at a time was a measurable part of every script call
@@ -680,7 +687,7 @@ LocalVariables::LocalVariables(UStruct* func) : Func(func)
 	}
 }
 
-LocalVariables::~LocalVariables()
+void LocalVariables::Reset()
 {
 	if (Func && Data && !Func->PlainDataLocals)
 	{
@@ -690,5 +697,8 @@ LocalVariables::~LocalVariables()
 		}
 	}
 
-	AlignedFree(Data);
+	if (Data != Inline)
+		AlignedFree(Data);
+	Func = nullptr;
+	Data = nullptr;
 }

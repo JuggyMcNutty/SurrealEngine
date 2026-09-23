@@ -382,6 +382,9 @@ bool UObject::IsEventEnabled(const NameString& name) const
 
 bool UObject::IsNonEventEnabled(const NameString& name) const
 {
+	// Every script call asks: most objects have nothing disabled
+	if (DisabledEvents.empty())
+		return true;
 	NameString stateName = GetStateName();
 	auto it = DisabledEvents.find(stateName);
 	return it == DisabledEvents.end() || it->second.find(name) == it->second.end();
@@ -420,6 +423,8 @@ bool UObject::IsEventEnabled(EventName name) const
 			return false;
 	}
 
+	if (DisabledEvents.empty())
+		return true;
 	NameString stateName = GetStateName();
 	auto it = DisabledEvents.find(stateName);
 	return it == DisabledEvents.end() || it->second.find(ToNameString(name)) == it->second.end();

@@ -49,4 +49,11 @@ public:
 	// Frame::Call's NameStringToEventName(Name), done once: the EventName, or
 	// -1 when the function is not an event, or -2 before the first call.
 	int EventIndex = -2;
+
+	// Frame::Call's parameters, gathered from Properties at the first call so
+	// that a call walks these rather than every local: the Parm properties in
+	// order (the return value among them), and the return value.
+	bool CallParmsReady = false;
+	Array<UProperty*> CallParms;
+	UProperty* ReturnParm = nullptr;
 };
