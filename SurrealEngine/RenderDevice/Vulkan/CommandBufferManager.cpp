@@ -32,8 +32,27 @@ CommandBufferManager::~CommandBufferManager()
 	DeleteFrameObjects();
 }
 
+void CommandBufferManager::WaitForFrame()
+{
+	if (!FramePending)
+		return;
+
+	VkResult result = vkWaitForFences(renderer->Device.get()->device, 1, &RenderFinishedFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+	if (result != VK_SUCCESS)
+		throw std::runtime_error("vkWaitForFences failed");
+	result = vkResetFences(renderer->Device.get()->device, 1, &RenderFinishedFence->fence);
+	if (result != VK_SUCCESS)
+		throw std::runtime_error("vkResetFences failed");
+
+	FramePending = false;
+	PendingDrawCommands.reset();
+	PendingTransferCommands.reset();
+	DeleteFrameObjects();
+}
+
 void CommandBufferManager::WaitForTransfer()
 {
+	WaitForFrame();
 	renderer->Uploads->SubmitUploads();
 
 	if (TransferCommands)
@@ -55,14 +74,20 @@ void CommandBufferManager::WaitForTransfer()
 	}
 }
 
-void CommandBufferManager::SubmitCommands(bool present, int presentWidth, int presentHeight, bool presentFullscreen)
+void CommandBufferManager::SubmitCommands(bool present, int presentWidth, int presentHeight, bool presentFullscreen, bool wait)
 {
+	WaitForFrame();
 	renderer->Uploads->SubmitUploads();
 
 	if (present)
 	{
 		if (SwapChain->Lost() || SwapChain->Width() != presentWidth || SwapChain->Height() != presentHeight || UsingVsync != renderer->UseVSync || UsingHdr != renderer->Hdr)
 		{
+			// A fence covers a submit, not the present queued after it: the
+			// old swapchain and its semaphores may still be in use until the
+			// device is idle.
+			vkDeviceWaitIdle(renderer->Device.get()->device);
+
 			UsingVsync = renderer->UseVSync;
 			UsingHdr = renderer->Hdr;
 			renderer->Framebuffers->DestroySwapChainFramebuffers();
@@ -119,6 +144,17 @@ void CommandBufferManager::SubmitCommands(bool present, int presentWidth, int pr
 		SwapChain->QueuePresent(PresentImageIndex, RenderFinishedSemaphores[PresentImageIndex].get());
 	}
 
+	if (!wait)
+	{
+		// Leave the frame in flight: the CPU goes on to the next game tick
+		// while the GPU draws this one. WaitForFrame collects it before
+		// anything touches its buffers, images or descriptors again.
+		FramePending = true;
+		PendingDrawCommands = std::move(DrawCommands);
+		PendingTransferCommands = std::move(TransferCommands);
+		return;
+	}
+
 	VkResult result = vkWaitForFences(renderer->Device.get()->device, 1, &RenderFinishedFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
 	if (result != VK_SUCCESS)
 		throw std::runtime_error("vkWaitForFences failed");
@@ -135,6 +171,7 @@ VulkanCommandBuffer* CommandBufferManager::GetTransferCommands()
 {
 	if (!TransferCommands)
 	{
+		WaitForFrame();
 		TransferCommands = CommandPool->createBuffer();
 		TransferCommands->begin();
 	}
@@ -145,6 +182,7 @@ VulkanCommandBuffer* CommandBufferManager::GetDrawCommands()
 {
 	if (!DrawCommands)
 	{
+		WaitForFrame();
 		DrawCommands = CommandPool->createBuffer();
 		DrawCommands->begin();
 	}

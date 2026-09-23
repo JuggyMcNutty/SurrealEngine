@@ -114,10 +114,15 @@ void VulkanError(const char* text)
 
 void VulkanRenderDevice::SubmitAndWait(bool present, int presentWidth, int presentHeight, bool presentFullscreen)
 {
+	Submit(present, presentWidth, presentHeight, presentFullscreen, true);
+}
+
+void VulkanRenderDevice::Submit(bool present, int presentWidth, int presentHeight, bool presentFullscreen, bool wait)
+{
 	if (SupportsBindless)
 		DescriptorSets->UpdateBindlessSet();
 
-	Commands->SubmitCommands(present, presentWidth, presentHeight, presentFullscreen);
+	Commands->SubmitCommands(present, presentWidth, presentHeight, presentFullscreen, wait);
 
 	Batch.SceneIndexStart = 0;
 	SceneVertexPos = 0;
@@ -174,6 +179,9 @@ void VulkanRenderDevice::Flush(bool AllowPrecache)
 
 void VulkanRenderDevice::Lock(vec4 InFlashScale, vec4 InFlashFog, vec4 ScreenClear, uint8_t* InHitData, int* InHitSize)
 {
+	// The previous frame may still be drawing (Unlock does not wait for it).
+	Commands->WaitForFrame();
+
 	HitData = InHitData;
 	HitSize = InHitSize;
 
@@ -276,13 +284,16 @@ void VulkanRenderDevice::Unlock(bool Blit)
 	int windowWidth = Viewport->GetNativePixelWidth();
 	int windowHeight = Viewport->GetNativePixelHeight();
 
-	SubmitAndWait(Blit ? true : false, windowWidth, windowHeight, Viewport->IsFullscreen());
+	// Leave the frame in flight, so the next game tick runs while the GPU
+	// draws -- unless the hit buffer has to be read back right away.
+	Submit(Blit ? true : false, windowWidth, windowHeight, Viewport->IsFullscreen(), HitData != nullptr);
 
 	Batch.Pipeline = nullptr;
 	Batch.DescriptorSet = nullptr;
 
 	if (Samplers->LODBias != LODBias)
 	{
+		Commands->WaitForFrame();
 		DescriptorSets->ClearCache();
 		Textures->ClearAllBindlessIndexes();
 		Samplers->CreateSceneSamplers();
@@ -1010,6 +1021,7 @@ void VulkanRenderDevice::PrecacheTexture(TextureInfo& Info, uint32_t PolyFlags)
 
 void VulkanRenderDevice::ClearTextureCache()
 {
+	Commands->WaitForFrame();
 	Batch.DescriptorSet = nullptr;
 	DescriptorSets->ClearCache();
 	Textures->ClearCache();

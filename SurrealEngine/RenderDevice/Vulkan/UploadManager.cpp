@@ -25,6 +25,9 @@ bool UploadManager::SupportsTextureFormat(TextureFormat Format) const
 
 void UploadManager::UploadTexture(CachedTexture* tex, const TextureInfo& Info, bool masked)
 {
+	// The upload buffer is reused from offset 0 after every submit
+	renderer->Commands->WaitForFrame();
+
 	int width = Info.USize;
 	int height = Info.VSize;
 	int mipcount = Info.NumMips;
@@ -69,6 +72,8 @@ void UploadManager::UploadTexture(CachedTexture* tex, const TextureInfo& Info, b
 
 void UploadManager::UploadTextureRect(CachedTexture* tex, const TextureInfo& Info, int x, int y, int w, int h)
 {
+	renderer->Commands->WaitForFrame();
+
 	TextureUploader* uploader = TextureUploader::GetUploader(Info.Format, renderer->Device->PhysicalDevice.Device);
 	if (!uploader || Info.NumMips < 1 || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > Info.Mips[0].Width || y + h > Info.Mips[0].Height || Info.Mips[0].Data.empty())
 		return;

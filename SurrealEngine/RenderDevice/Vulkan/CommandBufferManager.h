@@ -11,7 +11,12 @@ public:
 	~CommandBufferManager();
 
 	void WaitForTransfer();
-	void SubmitCommands(bool present, int presentWidth, int presentHeight, bool presentFullscreen);
+	void SubmitCommands(bool present, int presentWidth, int presentHeight, bool presentFullscreen, bool wait = true);
+
+	// Waits for a frame SubmitCommands left in flight (wait = false), if there
+	// is one. Anything that writes a buffer, image or descriptor the GPU may
+	// still be reading calls this first.
+	void WaitForFrame();
 	VulkanCommandBuffer* GetTransferCommands();
 	VulkanCommandBuffer* GetDrawCommands();
 	void DeleteFrameObjects();
@@ -40,4 +45,9 @@ private:
 	std::unique_ptr<VulkanCommandPool> CommandPool;
 	std::unique_ptr<VulkanCommandBuffer> DrawCommands;
 	std::unique_ptr<VulkanCommandBuffer> TransferCommands;
+
+	// The frame in flight: its command buffers live until its fence signals.
+	bool FramePending = false;
+	std::unique_ptr<VulkanCommandBuffer> PendingDrawCommands;
+	std::unique_ptr<VulkanCommandBuffer> PendingTransferCommands;
 };

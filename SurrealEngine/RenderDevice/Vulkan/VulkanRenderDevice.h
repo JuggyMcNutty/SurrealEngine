@@ -148,6 +148,7 @@ private:
 	ivec4 GetTextureIndexes(uint32_t PolyFlags, CachedTexture* tex, CachedTexture* lightmap, CachedTexture* macrotex, CachedTexture* detailtex);
 	void DrawBatch(VulkanCommandBuffer* cmdbuffer);
 	void SubmitAndWait(bool present, int presentWidth, int presentHeight, bool presentFullscreen);
+	void Submit(bool present, int presentWidth, int presentHeight, bool presentFullscreen, bool wait);
 
 	vec4 ApplyInverseGamma(vec4 color);
 
