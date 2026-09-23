@@ -6,6 +6,12 @@
 
 class UActor;
 
+// A run of lightmap texels: [x0, x1) of row y.
+struct LightmapSpan
+{
+	int y, x0, x1;
+};
+
 struct LightEffectArgs
 {
 	UActor* light;
@@ -23,7 +29,8 @@ struct LightEffectArgs
 class LightEffect
 {
 public:
-	void Run(UActor* light, int width, int height, const vec3* locations, vec3 base, vec3 normal, const float* shadowmap, float* result);
+	// Writes result[] in the spans only; the texels outside them are left as they were.
+	void Run(UActor* light, int width, const Array<LightmapSpan>& spans, const vec3* locations, vec3 base, vec3 normal, const float* shadowmap, float* result);
 
 private:
 	void NoneEffect(LightEffectArgs* args);

@@ -34,7 +34,11 @@ private:
 
 	void CalcWorldLocations(Coords MapCoords, const LightMapIndex& lmindex);
 
+	// Fills spans with the texels a light can reach; the others get nothing from it.
+	void FindLitSpans(UActor* light);
+
 	void AddLightContribution(UActor* light);
+	static void AddLightContribution(const vec3& lightcolor, const float* src, float* dest, int size);
 
 	int width = 0;
 	int height = 0;
@@ -47,4 +51,5 @@ private:
 	Shadowmap Shadow;
 	LightEffect Effect;
 	Array<float> illuminationmap;
+	Array<LightmapSpan> spans;
 };

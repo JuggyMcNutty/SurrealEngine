@@ -37,28 +37,33 @@ LightEffect::EffectFunc LightEffect::Effects[LE_Unused + 1] =
 	&LightEffect::NoneEffect, // LE_Unused
 };
 
-void LightEffect::Run(UActor* light, int width, int height, const vec3* locations, vec3 base, vec3 N, const float* shadowmap, float* result)
+void LightEffect::Run(UActor* light, int width, const Array<LightmapSpan>& spans, const vec3* locations, vec3 base, vec3 N, const float* shadowmap, float* result)
 {
+	if (spans.empty())
+		return;
+
 	if (!TablesInitialized)
 		InitTables();
 
 	LightEffectArgs args;
 	args.light = light;
-	args.size = width * height;
-	args.locations = locations;
 	args.N = N;
-	args.shadowmap = shadowmap;
-	args.result = result;
 	args.LightLocation = light->Location();
 	args.radius = light->WorldLightRadius();
 	args.invRadius = 1.0f / args.radius;
 	args.invRadiusSquared = args.invRadius * args.invRadius;
 
 	uint8_t effect = light->LightEffect();
-	if (effect <= LE_Unused)
-		(this->*Effects[effect])(&args);
-	else
-		NoneEffect(&args);
+	EffectFunc func = (effect <= LE_Unused) ? Effects[effect] : &LightEffect::NoneEffect;
+	for (const LightmapSpan& span : spans)
+	{
+		int offset = span.y * width + span.x0;
+		args.size = span.x1 - span.x0;
+		args.locations = locations + offset;
+		args.shadowmap = shadowmap + offset;
+		args.result = result + offset;
+		(this->*func)(&args);
+	}
 }
 
 void LightEffect::NoneEffect(LightEffectArgs* args)

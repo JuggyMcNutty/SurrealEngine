@@ -78,8 +78,11 @@ void LightmapBuilder::AddStaticLights(UModel* model, int lightMap)
 			UActor* light = lightlist[lightindex];
 			if (light->LightType() != LT_None && light->LightBrightness() > 0)
 			{
+				FindLitSpans(light);
+				if (spans.empty())
+					continue;
 				Shadow.Load(model, lightMap, lightindex);
-				Effect.Run(light, width, height, WorldLocations(), base, WorldNormal(), Shadow.Pixels(), illuminationmap.data());
+				Effect.Run(light, width, spans, WorldLocations(), base, WorldNormal(), Shadow.Pixels(), illuminationmap.data());
 				AddLightContribution(light);
 			}
 		}
@@ -94,22 +97,73 @@ void LightmapBuilder::AddDynamicLights(UModel* model, int lightMap, const Array<
 	{
 		if (light->LightType() != LT_None && light->LightBrightness() > 0)
 		{
-			Effect.Run(light, width, height, WorldLocations(), base, WorldNormal(), Shadow.Pixels(), illuminationmap.data());
+			FindLitSpans(light);
+			Effect.Run(light, width, spans, WorldLocations(), base, WorldNormal(), Shadow.Pixels(), illuminationmap.data());
 			AddLightContribution(light);
 		}
 	}
 }
 
+void LightmapBuilder::FindLitSpans(UActor* light)
+{
+	spans.clear();
+
+	// A cylinder light reaches any height, so its reach is not a sphere
+	if (width < 2 || light->LightEffect() == LE_Cylinder)
+	{
+		for (int y = 0; y < height; y++)
+			spans.push_back({ y, 0, width });
+		return;
+	}
+
+	// Each row of texel positions is a line, p(x) = row[0] + x * D, D the step
+	// from one texel to the next (CalcWorldLocations interpolates between the
+	// row's ends, so D is taken over the whole row, not from two neighbours).
+	// The texels within the radius are where |p(x) - light|^2 < radius^2; one
+	// texel of margin on each side covers the rounding in the positions.
+	vec3 lightLocation = light->Location();
+	float radius = light->WorldLightRadius();
+	float radiusSquared = radius * radius;
+	for (int y = 0; y < height; y++)
+	{
+		const vec3* row = &points[y * width];
+		vec3 P = row[0] - lightLocation;
+		vec3 D = (row[width - 1] - row[0]) * (1.0f / (width - 1));
+		float dd = dot(D, D), pd = dot(P, D), pp = dot(P, P);
+		if (!(dd > 0.0f))
+		{
+			if (pp < radiusSquared)
+				spans.push_back({ y, 0, width });
+			continue;
+		}
+		float disc = pd * pd - dd * (pp - radiusSquared);
+		if (!(disc > 0.0f))
+			continue;
+		float s = std::sqrt(disc);
+		float x0 = std::floor((-pd - s) / dd) - 1.0f;
+		float x1 = std::ceil((-pd + s) / dd) + 2.0f;
+		int ix0 = (int)std::clamp(x0, 0.0f, (float)width);
+		int ix1 = (int)std::clamp(x1, 0.0f, (float)width);
+		if (ix0 < ix1)
+			spans.push_back({ y, ix0, ix1 });
+	}
+}
+
 void LightmapBuilder::AddLightContribution(UActor* light)
 {
-#if 1
 	vec3 lightcolor = GetLightColor(light);
+	for (const LightmapSpan& span : spans)
+	{
+		int offset = span.y * width + span.x0;
+		AddLightContribution(lightcolor, illuminationmap.data() + offset, (float*)(lightcolors.data() + offset), span.x1 - span.x0);
+	}
+}
+
+void LightmapBuilder::AddLightContribution(const vec3& lightcolor, const float* src, float* dest, int size)
+{
 	float lightcolorR = lightcolor.r;
 	float lightcolorG = lightcolor.g;
 	float lightcolorB = lightcolor.b;
-	const float* src = illuminationmap.data();
-	float* dest = (float*)lightcolors.data();
-	int size = width * height;
 
 #ifdef USE_SSE2
 	__m128 mmlightcolor0 = _mm_setr_ps(lightcolorR, lightcolorG, lightcolorB, lightcolorR);
@@ -148,20 +202,6 @@ void LightmapBuilder::AddLightContribution(UActor* light)
 		src++;
 		dest += 3;
 	}
-#else
-	size_t count = (size_t)width * height;
-	vec3 lightcolor = GetLightColor(light);
-	const float* src = illuminationmap.data();
-	vec3* dest = lightcolors.data();
-	for (size_t i = 0; i < count; i++)
-	{
-		vec3 color = src[i] * lightcolor;
-		color.r = std::min(color.r, 1.0f);
-		color.g = std::min(color.g, 1.0f);
-		color.b = std::min(color.b, 1.0f);
-		dest[i] += color;
-	}
-#endif
 }
 
 vec3 LightmapBuilder::GetLightColor(UActor* light)
