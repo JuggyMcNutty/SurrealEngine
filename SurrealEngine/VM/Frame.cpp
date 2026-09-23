@@ -216,18 +216,15 @@ ExpressionValue Frame::Call(UFunction* func, UObject* instance, Array<Expression
 	}
 
 	// Trailing optional args may be missing. Add nothing values so the args list matches the function signature.
+	// (A function's Properties are its UProperty children in order, collected at load: no casting per call.)
 	int argindex = 0;
-	for (UField* field = func->Children; field != nullptr; field = field->Next)
+	for (UProperty* prop : func->Properties)
 	{
-		UProperty* prop = UObject::TryCast<UProperty>(field);
-		if (prop)
-		{
-			if (argindex == args.size() && AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::OptionalParm))
-				args.push_back(ExpressionValue::NothingValue());
+		if (argindex == args.size() && AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::OptionalParm))
+			args.push_back(ExpressionValue::NothingValue());
 
-			if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
-				argindex++;
-		}
+		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
+			argindex++;
 	}
 
 	if (AllFlags(func->FuncFlags, FunctionFlags::Native))
@@ -246,21 +243,17 @@ ExpressionValue Frame::CallScript(UFunction* func, UObject* instance, Array<Expr
 
 	// Store args in function frame local variables
 	int argindex = 0;
-	for (UField* field = func->Children; field != nullptr; field = field->Next)
+	for (UProperty* prop : func->Properties)
 	{
-		UProperty* prop = UObject::TryCast<UProperty>(field);
-		if (prop)
+		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
 		{
-			ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables->Data, prop);
-			if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
+			if (argindex < args.size())
 			{
-				if (argindex < args.size())
-				{
-					lvalue.Store(args[argindex]);
-				}
-
-				argindex++;
+				ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables->Data, prop);
+				lvalue.Store(args[argindex]);
 			}
+
+			argindex++;
 		}
 	}
 
@@ -272,26 +265,21 @@ ExpressionValue Frame::CallScript(UFunction* func, UObject* instance, Array<Expr
 
 	// Copy out params from frame local variables
 	argindex = 0;
-	for (UField* field = func->Children; field != nullptr; field = field->Next)
+	for (UProperty* prop : func->Properties)
 	{
-		UProperty* prop = UObject::TryCast<UProperty>(field);
-		if (prop)
+		if (AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::OutParm) && argindex < args.size())
 		{
 			ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables->Data, prop);
-
-			if (AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::OutParm) && argindex < args.size())
-			{
-				args[argindex].Store(lvalue);
-			}
-
-			if (AllFlags(prop->PropFlags, PropertyFlags::ReturnParm) && result.GetType() == ExpressionValueType::Nothing)
-			{
-				result = ExpressionValue::DefaultValue(prop);
-			}
-
-			if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
-				argindex++;
+			args[argindex].Store(lvalue);
 		}
+
+		if (AllFlags(prop->PropFlags, PropertyFlags::ReturnParm) && result.GetType() == ExpressionValueType::Nothing)
+		{
+			result = ExpressionValue::DefaultValue(prop);
+		}
+
+		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
+			argindex++;
 	}
 
 	return result;
@@ -302,20 +290,16 @@ ExpressionValue Frame::CallNative(UFunction* func, UObject* instance, Array<Expr
 	// Native functions expect the last parameter to be the return value
 	bool returnparmfound = false;
 	int argindex = 0;
-	for (UField* field = func->Children; field != nullptr; field = field->Next)
+	for (UProperty* prop : func->Properties)
 	{
-		UProperty* prop = UObject::TryCast<UProperty>(field);
-		if (prop)
+		if (AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::ReturnParm))
 		{
-			if (AllFlags(prop->PropFlags, PropertyFlags::Parm | PropertyFlags::ReturnParm))
-			{
-				ExpressionValue retval = ExpressionValue::PropertyValue(prop);
-				args.push_back(std::move(retval));
-				returnparmfound = true;
-			}
-			if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
-				argindex++;
+			ExpressionValue retval = ExpressionValue::PropertyValue(prop);
+			args.push_back(std::move(retval));
+			returnparmfound = true;
 		}
+		if (AllFlags(prop->PropFlags, PropertyFlags::Parm))
+			argindex++;
 	}
 
 	if (func->NativeFuncIndex != 0)
