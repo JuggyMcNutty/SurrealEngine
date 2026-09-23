@@ -122,6 +122,8 @@ public:
 	CycleActorsIterator(UObject* BaseClass, UObject** Actor, int* outIndex);
 	bool Next() override;
 private:
+	bool NextByScan();
+
 	UStruct* BaseClass = nullptr;
 	UObject** Actor = nullptr;
 	int* outIndex = nullptr;

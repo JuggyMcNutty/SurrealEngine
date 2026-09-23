@@ -62,6 +62,7 @@ UActor* UActor::Spawn(UClass* SpawnClass, std::optional<UActor*> SpawnOwner, std
 	actor->Region().Zone = actor->Level();
 	actor->Index = (int)XLevel()->Actors.size();
 	XLevel()->Actors.push_back(actor);
+	XLevel()->ActorsVersion++;
 	XLevel()->Collision.AddToCollision(actor);
 
 	actor->SetOwner(SpawnOwner.has_value() && SpawnOwner.value() ? *SpawnOwner : nullptr);
@@ -164,6 +165,8 @@ bool UActor::Destroy()
 	if (Index == -1)
 		throw std::runtime_error("Actor index was never set!");
 	level->Actors[Index] = nullptr;
+	level->ActorsVersion++;
+	level->ActorsHaveHoles = true;
 
 	return true;
 }

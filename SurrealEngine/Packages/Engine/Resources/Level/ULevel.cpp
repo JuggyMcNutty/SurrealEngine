@@ -117,17 +117,23 @@ void ULevel::Tick(float elapsed, bool gamePaused)
 		}
 	}
 
-	Array<UActor*> newActorList;
-	newActorList.reserve(Actors.size());
-	for (UActor* actor : Actors)
+	// Without a nulled slot the compacted list is the same list
+	if (ActorsHaveHoles)
 	{
-		if (actor)
+		Array<UActor*> newActorList;
+		newActorList.reserve(Actors.size());
+		for (UActor* actor : Actors)
 		{
-			actor->Index = (int)newActorList.size();
-			newActorList.push_back(actor);
+			if (actor)
+			{
+				actor->Index = (int)newActorList.size();
+				newActorList.push_back(actor);
+			}
 		}
+		Actors.swap(newActorList);
+		ActorsHaveHoles = false;
+		ActorsVersion++;
 	}
-	Actors.swap(newActorList);
 
 	ticked = !ticked;
 }

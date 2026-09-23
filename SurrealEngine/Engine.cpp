@@ -726,6 +726,7 @@ void Engine::LoadMap(const UnrealURL& url, const std::map<std::string, std::stri
 	GameInfo->InitActorZone();
 	GameInfo->Index = (int)Level->Actors.size();
 	Level->Actors.push_back(GameInfo);
+	Level->ActorsVersion++;
 
 	LevelInfo->Game() = GameInfo;
 

@@ -16,6 +16,7 @@ void ULevelBase::Load(ObjectStream* stream)
 			actor->Index = (int)Actors.size();
 		Actors.push_back(actor);
 	}
+	ActorsVersion++;
 
 	Protocol = stream->ReadString();
 	Host = stream->ReadString();

@@ -11,6 +11,34 @@
 
 #include <algorithm>
 
+// The slots of the level's actors that pass test, rebuilt only when the
+// actor list has changed. The actor iterators tested every actor in the level
+// for its class -- Liberty Island has ~2,500 -- at a cache miss each on the
+// handheld.
+template<typename Key, typename Test>
+static const Array<int>& ActorSlots(std::map<Key, ULevelBase::ClassSlots>& indexes, ULevel* level, Key key, Test test)
+{
+	ULevelBase::ClassSlots& index = indexes[key];
+	if (index.Version != level->ActorsVersion)
+	{
+		index.Slots.clear();
+		const Array<UActor*>& actors = level->Actors;
+		for (size_t i = 0; i < actors.size(); i++)
+		{
+			if (actors[i] && test(actors[i]))
+				index.Slots.push_back((int)i);
+		}
+		index.Version = level->ActorsVersion;
+	}
+	return index.Slots;
+}
+
+// The slots of actors whose class, or a parent of it, has the name
+static const Array<int>& ActorSlotsByName(ULevel* level, const NameString& className)
+{
+	return ActorSlots(level->ActorsByClassName, level, className.GetCompareIndex(), [&](UActor* actor) { return actor->IsA(className); });
+}
+
 AllObjectsIterator::AllObjectsIterator(UObject* BaseClass, UObject** ReturnValue, UObject* InOuter)
 	: BaseClass(BaseClass), ReturnValue(ReturnValue), InOuter(InOuter), m_Objects(GC::GetObjects()), m_Iterator(m_Objects.begin())
 {
@@ -56,16 +84,19 @@ bool AllActorsIterator::Next()
 	bool matchTag = !MatchTag.IsNone();
 	bool matchEvent = !MatchEvent.IsNone();
 
-	size_t size = engine->Level->Actors.size();
-	while (index < size)
+	const Array<UActor*>& actors = engine->Level->Actors;
+	const Array<int>& slots = ActorSlotsByName(engine->Level, BaseClass->Name);
+	for (auto it = std::lower_bound(slots.begin(), slots.end(), (int)index); it != slots.end(); ++it)
 	{
-		UActor* actor = engine->Level->Actors[index++];
-		if (actor && actor->IsA(BaseClass->Name) && (!matchTag || actor->Tag() == MatchTag) && (!matchEvent || actor->Event() == MatchEvent))
+		UActor* actor = actors[*it];
+		index = (size_t)*it + 1;
+		if (actor && (!matchTag || actor->Tag() == MatchTag) && (!matchEvent || actor->Event() == MatchEvent))
 		{
 			*ReturnValue = actor;
 			return true;
 		}
 	}
+	index = actors.size();
 	*ReturnValue = nullptr;
 	return false;
 }
@@ -178,7 +209,59 @@ CycleActorsIterator::CycleActorsIterator(UObject* BaseClass, UObject** Actor, in
 	position = (outIndex && *outIndex >= 0 && (size_t)*outIndex < size) ? (size_t)*outIndex : 0;
 }
 
+// Every NPC's CheckEnemyPresence cycles through the pawns this way each tick,
+// and a scan of the level's actors for the next one cost a cache miss per
+// actor -- about a sixth of the game tick on the handheld. The level keeps
+// the slots holding each class asked for, rebuilt when its actor list
+// changes, so each step jumps to the next such slot. The order, the lap and
+// the indexes are the scan's.
 bool CycleActorsIterator::Next()
+{
+	ULevel* level = engine->Level;
+	const Array<UActor*>& actors = level->Actors;
+	size_t size = actors.size();
+	if (!BaseClass || size == 0 || position >= size)
+		return NextByScan();
+
+	// Class pointers along the BaseStruct chain, as the scan tests them
+	const Array<int>& slots = ActorSlots(level->ActorsByClass, level, BaseClass, [&](UActor* actor) {
+		for (UStruct* cls = actor->Class; cls; cls = cls->BaseStruct)
+		{
+			if (cls == BaseClass)
+				return true;
+		}
+		return false;
+	});
+
+	while (visited < size && !slots.empty())
+	{
+		// The next slot of the class after position, going round: the scan
+		// would reach it after step more slots, the start's own slot last.
+		auto it = std::upper_bound(slots.begin(), slots.end(), (int)position);
+		size_t slot = (it != slots.end()) ? (size_t)*it : (size_t)slots.front();
+		size_t step = (slot + size - position) % size;
+		if (step == 0)
+			step = size;
+		if (visited + step > size)
+			break;
+		visited += step;
+		position = slot;
+
+		UActor* candidate = actors[slot];
+		if (!candidate || candidate->bDeleteMe())
+			continue;
+		*Actor = candidate;
+		if (outIndex)
+			*outIndex = (int)position;
+		return true;
+	}
+	visited = size;
+	*Actor = nullptr;
+	return false;
+}
+
+// No class, an empty level or a start past the end: the scan itself
+bool CycleActorsIterator::NextByScan()
 {
 	const Array<UActor*>& actors = engine->Level->Actors;
 	size_t size = actors.size();
@@ -246,9 +329,11 @@ bool IntDescIterator::Next()
 
 RadiusActorsIterator::RadiusActorsIterator(UActor* Caller, UObject* BaseClass, UObject** Actor, float Radius, vec3 Location) : BaseClass(BaseClass), Actor(Actor), Radius(Radius), Location(Location)
 {
-	for (UActor* levelActor : engine->Level->Actors)
+	const Array<UActor*>& actors = engine->Level->Actors;
+	for (int slot : ActorSlotsByName(engine->Level, BaseClass->Name))
 	{
-		if (levelActor && levelActor->IsA(BaseClass->Name) && length(levelActor->Location() - Location) <= Radius)
+		UActor* levelActor = actors[slot];
+		if (length(levelActor->Location() - Location) <= Radius)
 			RadiusActors.push_back(levelActor);
 	}
 
@@ -348,12 +433,14 @@ bool TraceActorsIterator::Next()
 
 VisibleActorsIterator::VisibleActorsIterator(UActor* Caller, UObject* BaseClass, UObject** Actor, float Radius, const vec3& Location) : BaseClass(BaseClass), Actor(Actor), Radius(Radius), Location(Location)
 {
-	for (auto levelActor : engine->Level->Actors)
+	const Array<UActor*>& actors = engine->Level->Actors;
+	for (int slot : ActorSlotsByName(engine->Level, BaseClass->Name))
 	{
-		// Our checks:
-		// * Whether the actor we're dealing with is not hidden and is the class of BaseClass
+		// Our checks (the slots are actors of the class of BaseClass):
+		// * Whether the actor we're dealing with is not hidden
 		// * Then whether the distance of the actor from our given Location is no more than Radius
-		if (levelActor && !levelActor->bHidden() && levelActor->IsA(BaseClass->Name) &&
+		UActor* levelActor = actors[slot];
+		if (!levelActor->bHidden() &&
 			length(levelActor->Location() - Location) <= Radius && Caller->FastTrace(levelActor->Location(), Location))
 		{
 			VisibleActors.push_back(levelActor);
