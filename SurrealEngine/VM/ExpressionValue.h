@@ -100,6 +100,42 @@ public:
 		return *this;
 	}
 
+	// The evaluator hands every value up by assignment: a copy would duplicate strings and structs
+	ExpressionValue& operator=(ExpressionValue&& v)
+	{
+		if (this != &v)
+		{
+			Deinit();
+
+			Type = v.Type;
+			if (!v.VariableProperty)
+			{
+				Ptr = (Type != ExpressionValueType::Nothing) ? &Buffer : nullptr;
+				switch (Type)
+				{
+				default: Buffer = v.Buffer; break;
+				case ExpressionValueType::ValueVector: new(PtrByte) vec3(std::move(*v.PtrVector)); break;
+				case ExpressionValueType::ValueRotator: new(PtrByte) Rotator(std::move(*v.PtrRotator)); break;
+				case ExpressionValueType::ValueString: new(PtrByte) std::string(std::move(*v.PtrString)); break;
+				case ExpressionValueType::ValueName: new(PtrByte) NameString(std::move(*v.PtrName)); break;
+				case ExpressionValueType::ValueColor: new(PtrByte) Color(std::move(*v.PtrColor)); break;
+				case ExpressionValueType::ValueStruct: new(PtrByte) StructValue(std::move(*v.GetStructValue())); Ptr = GetStructValue()->Ptr; break;
+				case ExpressionValueType::ValueArray: new(PtrByte) ArrayValue(std::move(*v.GetArrayValue())); Ptr = GetArrayValue()->Ptr; break;
+				case ExpressionValueType::ValueCoords: new(PtrByte) Coords(std::move(*v.PtrCoords)); break;
+				case ExpressionValueType::ValueQuat: new(PtrByte) quaternion(std::move(*v.PtrQuat)); break;
+				}
+			}
+			else
+			{
+				VariableProperty = v.VariableProperty;
+				Ptr = v.Ptr;
+			}
+			BoolInfo.Ptr = (uint32_t*)Ptr;
+			BoolInfo.Mask = v.BoolInfo.Mask;
+		}
+		return *this;
+	}
+
 	~ExpressionValue()
 	{
 		Deinit();

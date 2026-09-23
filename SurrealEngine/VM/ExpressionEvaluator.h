@@ -33,10 +33,25 @@ struct ExpressionEvalResult
 class ExpressionEvaluator : ExpressionVisitor
 {
 public:
+	// Evaluates a statement: its value, and what the frame does next
 	static ExpressionEvalResult Eval(Expression* expr, UObject* self, UObject* context, void* localVariables);
 
 private:
-	ExpressionEvalResult Eval(Expression* expr) { return Eval(expr, Self, Context, LocalVariables); }
+	ExpressionEvaluator(ExpressionEvalResult& result, UObject* self, UObject* context, void* localVariables)
+		: Result(result), Self(self), Context(context), LocalVariables(localVariables), Out(&result.Value) {}
+
+	// A nested expression's value, from this same evaluator. Only the statement
+	// says what the frame does next: whatever else a nested expression reports
+	// is dropped, as it was when every expression had an evaluator and a
+	// result of its own.
+	ExpressionValue Value(Expression* expr);
+	ExpressionValue Value(Expression* expr, UObject* context);
+
+	// Evaluates expr as this expression (Skip, Context): its value is this
+	// one's, and so is what it says the frame does next.
+	void PassThrough(Expression* expr, UObject* context);
+
+	bool IsStatement() const { return Out == &Result.Value; }
 
 	void Expr(LocalVariableExpression* expr) override;
 	void Expr(InstanceVariableExpression* expr) override;
@@ -132,8 +147,9 @@ private:
 
 	void Call(UFunction* func, const Array<Expression*>& exprArgs);
 
-	ExpressionEvalResult Result;
+	ExpressionEvalResult& Result;
 	UObject* Self = nullptr;
 	UObject* Context = nullptr;
 	void* LocalVariables = nullptr;
+	ExpressionValue* Out = nullptr; // where the expression being visited leaves its value
 };

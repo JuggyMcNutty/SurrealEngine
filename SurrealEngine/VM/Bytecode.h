@@ -4,6 +4,7 @@
 #include "Packages/Core/Properties/UProperty.h"
 #include "Package/Package.h"
 #include "Expression.h"
+#include <algorithm>
 
 class BytecodeStream;
 
@@ -12,10 +13,12 @@ class Bytecode
 public:
 	Bytecode(const Array<uint8_t>& bytecode, Package* package);
 
+	// Every jump lands here. Statements are read in order, so their offsets
+	// are sorted: a binary search over them, not the map of every expression.
 	int FindStatementIndex(uint16_t offset) const
 	{
-		auto it = OffsetToExpression.find(offset);
-		return it != OffsetToExpression.end() ? it->second->StatementIndex : -1;
+		auto it = std::lower_bound(StatementOffsets.begin(), StatementOffsets.end(), offset);
+		return it != StatementOffsets.end() && *it == offset ? (int)(it - StatementOffsets.begin()) : -1;
 	}
 
 	int FindOffset(int statementIndex) const
@@ -57,6 +60,7 @@ private:
 	}
 
 	std::map<uint16_t, Expression*> OffsetToExpression;
+	Array<uint16_t> StatementOffsets;
 	Array<std::unique_ptr<Expression>> Allocations;
 };
 

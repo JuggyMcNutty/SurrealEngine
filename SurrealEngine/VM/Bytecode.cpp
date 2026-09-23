@@ -9,6 +9,7 @@ Bytecode::Bytecode(const Array<uint8_t>& bytecode, Package* package)
 	BytecodeStream stream(bytecode.data(), bytecode.size(), package);
 	while (!stream.IsEnd())
 	{
+		StatementOffsets.push_back(stream.GetOffset());
 		Statements.push_back(ReadToken(&stream, 0));
 		Statements.back()->StatementIndex = (int)Statements.size() - 1;
 	}
