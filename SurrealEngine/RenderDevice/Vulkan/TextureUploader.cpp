@@ -3,6 +3,10 @@
 #include "TextureUploader.h"
 #include "RenderDevice/RenderDevice.h"
 
+#ifdef USE_NEON
+#include <arm_neon.h>
+#endif
+
 #ifdef USE_SSE2
 #include <immintrin.h>
 #endif
@@ -751,6 +755,28 @@ void TextureUploader_RGBA32F_Decode::UploadRect(void* d, UnrealMipmap* mip, int 
 	int pitch = mip->Width * 16;
 	float* src = (float*)(mip->Data.data() + (size_t)x * 16 + (size_t)y * pitch);
 	uint8_t* dst = (uint8_t*)d;
+#ifdef USE_NEON
+	// Every lightmap rebuilt goes through here, several a frame on the
+	// handheld. The same clamp, scale and truncation, four channels at once:
+	// checked on the device against the loop below for every float from 0 to
+	// 1 and for negatives, overflows, infinities and NaNs -- all the same.
+	const float32x4_t zero = vdupq_n_f32(0.0f), one = vdupq_n_f32(1.0f), scale = vdupq_n_f32(255.0f), half = vdupq_n_f32(0.5f);
+	for (int i = 0; i < h; i++)
+	{
+		for (int j = 0; j < w; j++)
+		{
+			float32x4_t c = vld1q_f32(src + (size_t)j * 4);
+			uint32x4_t lt = vcltq_f32(c, zero), gt = vcgtq_f32(c, one);
+			c = vbslq_f32(lt, zero, vbslq_f32(gt, one, c));
+			uint32x4_t u = vcvtq_u32_f32(vaddq_f32(vmulq_f32(c, scale), half));
+			uint16x4_t u16 = vmovn_u32(u);
+			uint8x8_t u8 = vmovn_u16(vcombine_u16(u16, u16));
+			vst1_lane_u32((uint32_t*)(dst + (size_t)j * 4), vreinterpret_u32_u8(u8), 0);
+		}
+		dst += (size_t)w * 4;
+		src = (float*)((uint8_t*)src + pitch);
+	}
+#else
 	for (int i = 0; i < h; i++)
 	{
 		for (int j = 0; j < w; j++)
@@ -766,4 +792,5 @@ void TextureUploader_RGBA32F_Decode::UploadRect(void* d, UnrealMipmap* mip, int 
 		dst += (size_t)w * 4;
 		src = (float*)((uint8_t*)src + pitch);
 	}
+#endif
 }
