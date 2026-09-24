@@ -283,9 +283,13 @@ ExpressionValue Frame::CallScript(UFunction* func, UObject* instance, CallArgume
 	Frame frame(instance, func);
 	const Array<UProperty*>& parms = func->CallParms;
 
-	// Store args in function frame local variables
+	// Store args in function frame local variables. An optional argument the
+	// caller left out keeps the value the frame gave it, zero, as in UE1: a
+	// struct or an array would be copied from nothing.
 	for (size_t i = 0; i < parms.size() && i < args.size(); i++)
 	{
+		if (args[i].GetType() == ExpressionValueType::Nothing)
+			continue;
 		ExpressionValue lvalue = ExpressionValue::Variable(frame.Variables.Data, parms[i]);
 		lvalue.Store(args[i]);
 	}
