@@ -431,9 +431,97 @@ void UActor::AIStartEvent(const NameString& eventName, uint8_t eventType, std::o
 	//LogUnimplemented(Name.ToString() + ": AIStartEvent('" + eventName.ToString() + "')");
 }
 
+// A light's share of what the AI sees by, 0 to 1: its brightness, a third of
+// it for a fully saturated colour and all of it for white.
+static float AILuminance(uint8_t brightness, uint8_t saturation)
+{
+	return (float)((saturation + 127.5) * (1.0 / 382.5) * (brightness * (1.0 / 255.0)));
+}
+
+// The light on an actor at a location, 0 to 1, as Deus Ex's AI sees it: half
+// of each light reaching it -- a static one only with no wall or mover
+// between -- the nearer its middle the more, and twice the zone's ambient
+// light. An unlit actor is always lit. From Engine.dll, where it serves
+// AActor::AIVisibility.
+static float AILightAt(UActor* actor, const vec3& location)
+{
+	float lights = 0.0f;
+	if (actor->bUnlit())
+	{
+		lights = 1.0f;
+	}
+	else
+	{
+		// The original tests every actor for a light reaching the location.
+		// The light system's tree holds the same lights, as of the last frame
+		// drawn, and gives the few whose reach may take it in; one destroyed
+		// since is skipped.
+		ULevel* level = actor->XLevel();
+		for (UActor* light : level->Light.LightsNear(location))
+		{
+			if (light == actor || light->bDeleteMe() || light->LightType() == LT_None || light->LightBrightness() == 0)
+				continue;
+
+			float radius = light->WorldLightRadius();
+			float radiusSq = radius * radius;
+			vec3 d = location - light->Location();
+			float distSq = dot(d, d);
+			if (radiusSq <= distSq)
+				continue;
+
+			if (light->bStatic())
+			{
+				const TraceFlags flags = { .movers = true, .world = true };
+				CollisionHit hit = level->Collision.TraceFirstHit(light->Location(), location, actor, vec3(0.0f), flags);
+				if (hit.Actor || hit.Node)
+					continue;
+			}
+
+			lights += AILuminance(light->LightBrightness(), light->LightSaturation()) * (1.0f - (float)std::sqrt(distSq / radiusSq));
+		}
+		lights *= 0.5f;
+	}
+
+	UZoneInfo* zone = actor->Region().Zone;
+	float ambient = zone ? AILuminance(zone->AmbientBrightness(), zone->AmbientSaturation()) : 0.0f;
+	return std::clamp(ambient * 2.0f + lights, 0.0f, 1.0f);
+}
+
+// How visible this actor is to Deus Ex's AI, 0 to 1 (Engine.dll
+// AActor::AIVisibility): the light on it, found again a quarter second after
+// the last finding and eased from one finding to the next, and with
+// bIncludeVelocity (the default) up to half again as much when it moves at
+// 30 to 200 units a second.
 float UActor::AIVisibility(std::optional<bool> bIncludeVelocity)
 {
-	LogUnimplemented("Actor.AIVisibility");
-	//LogMessage(Name.ToString() + ": AIVisibility");
-	return 0.0f;
+	const float period = 0.25f;
+	float now = Level()->TimeSeconds();
+	float elapsed = now - VisUpdateTime();
+	float visibility;
+	if (elapsed > period * 2.0f)
+	{
+		VisUpdateTime() = now;
+		visibility = AILightAt(this, Location());
+		CurrentVisibility() = visibility;
+		LastVisibility() = visibility;
+	}
+	else if (elapsed > period)
+	{
+		LastVisibility() = CurrentVisibility();
+		VisUpdateTime() = now;
+		CurrentVisibility() = AILightAt(this, Location());
+		visibility = LastVisibility();
+	}
+	else
+	{
+		visibility = (CurrentVisibility() - LastVisibility()) * (elapsed / period) + LastVisibility();
+	}
+
+	if (bIncludeVelocity.value_or(true))
+	{
+		float speed = length(Velocity());
+		float factor = std::clamp((speed - 30.0f) / (200.0f - 30.0f), 0.0f, 1.0f);
+		visibility += factor * visibility * 0.5f;
+	}
+	return std::clamp(visibility, 0.0f, 1.0f);
 }

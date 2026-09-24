@@ -458,6 +458,7 @@ struct PropertyOffsets_Actor
 	PropertyDataOffset LastConEndTime;
 	PropertyDataOffset ConStartInterval;
 	PropertyDataOffset VisUpdateTime;
+	PropertyDataOffset bDetectable;
 	PropertyDataOffset CurrentVisibility;
 	PropertyDataOffset LastVisibility;
 	PropertyDataOffset SmellClass;

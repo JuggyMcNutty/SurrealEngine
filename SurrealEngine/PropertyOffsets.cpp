@@ -506,6 +506,7 @@ static void InitPropertyOffsets_Actor(PackageManager* packages)
 		PropOffsets_Actor.LastConEndTime = cls->GetPropertyDataOffset("LastConEndTime");
 		PropOffsets_Actor.ConStartInterval = cls->GetPropertyDataOffset("ConStartInterval");
 		PropOffsets_Actor.VisUpdateTime = cls->GetPropertyDataOffset("VisUpdateTime");
+		PropOffsets_Actor.bDetectable = cls->GetPropertyDataOffset("bDetectable");
 		PropOffsets_Actor.CurrentVisibility = cls->GetPropertyDataOffset("CurrentVisibility");
 		PropOffsets_Actor.LastVisibility = cls->GetPropertyDataOffset("LastVisibility");
 		PropOffsets_Actor.SmellClass = cls->GetPropertyDataOffset("SmellClass");

@@ -104,6 +104,67 @@ CollisionHitList TraceTester::Trace(const vec3& from, const vec3& to, float heig
 	return uniqueHits;
 }
 
+// Calls visit once for each actor in the collision cells the segment passes
+// through, until it returns true; then so does this.
+template<typename Visit>
+bool TraceTester::VisitActorsOnRay(const vec3& from, const vec3& to, Visit&& visit)
+{
+	int checkCounter = NextCheckCounter();
+	ivec3 start = GetRayStartExtents(from, to);
+	ivec3 end = GetRayEndExtents(from, to);
+	if (end.x - start.x >= 100 || end.y - start.y >= 100 || end.z - start.z >= 100)
+		return false;
+
+	// Only the cells the segment passes through, not every cell of its
+	// box: a long sight line's box is mostly cells it never enters, and an
+	// actor is in every cell its collision box touches, so these are all
+	// the actors it can hit. Slab by slab along the segment's longest
+	// axis, each slab's cells on the other two axes found from where the
+	// segment enters and leaves it, a unit wider each way.
+	vec3 delta = to - from;
+	vec3 absDelta = { std::abs(delta.x), std::abs(delta.y), std::abs(delta.z) };
+	int axis = absDelta.x >= absDelta.y ? (absDelta.x >= absDelta.z ? 0 : 2) : (absDelta.y >= absDelta.z ? 1 : 2);
+	for (int slab = start[axis]; slab < end[axis]; slab++)
+	{
+		float tA = (slab * 256.0f - from[axis]) / delta[axis];
+		float tB = ((slab + 1) * 256.0f - from[axis]) / delta[axis];
+		float t0 = std::clamp(std::min(tA, tB), 0.0f, 1.0f);
+		float t1 = std::clamp(std::max(tA, tB), 0.0f, 1.0f);
+		ivec3 cellStart = start, cellEnd = end;
+		cellStart[axis] = slab;
+		cellEnd[axis] = slab + 1;
+		for (int a = 0; a < 3; a++)
+		{
+			if (a == axis)
+				continue;
+			float c0 = from[a] + delta[a] * t0;
+			float c1 = from[a] + delta[a] * t1;
+			cellStart[a] = std::max((int)std::floor((std::min(c0, c1) - 1.0f) * (1.0f / 256.0f)), start[a]);
+			cellEnd[a] = std::min((int)std::floor((std::max(c0, c1) + 1.0f) * (1.0f / 256.0f)) + 1, end[a]);
+		}
+
+		for (int z = cellStart.z; z < cellEnd.z; z++)
+		{
+			for (int y = cellStart.y; y < cellEnd.y; y++)
+			{
+				for (int x = cellStart.x; x < cellEnd.x; x++)
+				{
+					for (UActor* actor : GetActors(x, y, z))
+					{
+						if (actor->Collision.CheckCounter != checkCounter)
+						{
+							actor->Collision.CheckCounter = checkCounter;
+							if (visit(actor))
+								return true;
+						}
+					}
+				}
+			}
+		}
+	}
+	return false;
+}
+
 bool TraceTester::TraceAnyHit(vec3 from, vec3 to, UActor* tracingActor, bool traceActors, bool traceWorld, bool visibilityOnly)
 {
 	if (from == to || (!traceActors && !traceWorld))
@@ -121,64 +182,17 @@ bool TraceTester::TraceAnyHit(vec3 from, vec3 to, UActor* tracingActor, bool tra
 	tmax += margin;
 
 	CollisionHitList hits;
-
-	int checkCounter = NextCheckCounter();
-	ivec3 start = GetRayStartExtents(from, to);
-	ivec3 end = GetRayEndExtents(from, to);
-	if (end.x - start.x < 100 && end.y - start.y < 100 && end.z - start.z < 100)
-	{
-		// Only the cells the segment passes through, not every cell of its
-		// box: a long sight line's box is mostly cells it never enters, and an
-		// actor is in every cell its collision box touches, so these are all
-		// the actors it can hit. Slab by slab along the segment's longest
-		// axis, each slab's cells on the other two axes found from where the
-		// segment enters and leaves it, a unit wider each way.
-		vec3 delta = to - from;
-		vec3 absDelta = { std::abs(delta.x), std::abs(delta.y), std::abs(delta.z) };
-		int axis = absDelta.x >= absDelta.y ? (absDelta.x >= absDelta.z ? 0 : 2) : (absDelta.y >= absDelta.z ? 1 : 2);
-		for (int slab = start[axis]; slab < end[axis]; slab++)
+	bool actorHit = VisitActorsOnRay(from, to, [&](UActor* actor) {
+		if (actor != tracingActor && actor->bBlockActors())
 		{
-			float tA = (slab * 256.0f - from[axis]) / delta[axis];
-			float tB = ((slab + 1) * 256.0f - from[axis]) / delta[axis];
-			float t0 = std::clamp(std::min(tA, tB), 0.0f, 1.0f);
-			float t1 = std::clamp(std::max(tA, tB), 0.0f, 1.0f);
-			ivec3 cellStart = start, cellEnd = end;
-			cellStart[axis] = slab;
-			cellEnd[axis] = slab + 1;
-			for (int a = 0; a < 3; a++)
-			{
-				if (a == axis)
-					continue;
-				float c0 = from[a] + delta[a] * t0;
-				float c1 = from[a] + delta[a] * t1;
-				cellStart[a] = std::max((int)std::floor((std::min(c0, c1) - 1.0f) * (1.0f / 256.0f)), start[a]);
-				cellEnd[a] = std::min((int)std::floor((std::max(c0, c1) + 1.0f) * (1.0f / 256.0f)) + 1, end[a]);
-			}
-
-			for (int z = cellStart.z; z < cellEnd.z; z++)
-			{
-				for (int y = cellStart.y; y < cellEnd.y; y++)
-				{
-					for (int x = cellStart.x; x < cellEnd.x; x++)
-					{
-						for (UActor* actor : GetActors(x, y, z))
-						{
-							if (actor->Collision.CheckCounter != checkCounter)
-							{
-								actor->Collision.CheckCounter = checkCounter;
-								if (actor != tracingActor && actor->bBlockActors())
-								{
-									TraceActor(actor, origin, tmin, direction, tmax, 0.0, 0.0, traceActors, traceWorld, visibilityOnly, hits);
-									if (!hits.empty())
-										return true;
-								}
-							}
-						}
-					}
-				}
-			}
+			TraceActor(actor, origin, tmin, direction, tmax, 0.0, 0.0, traceActors, traceWorld, visibilityOnly, hits);
+			if (!hits.empty())
+				return true;
 		}
-	}
+		return false;
+	});
+	if (actorHit)
+		return true;
 
 	if (traceWorld)
 	{
@@ -187,6 +201,37 @@ bool TraceTester::TraceAnyHit(vec3 from, vec3 to, UActor* tracingActor, bool tra
 	}
 
 	return false;
+}
+
+// As UE1's MultiLineCheck with the NF_NotVisBlocking node flags, as far as a
+// yes or no: world and mover surfaces that block visibility, and each actor
+// crossed that blocksSight says blocks, whatever it collides with. The end is
+// often a point on a surface (the foot of a pawn standing on it), which a
+// segment ending there does not cross: no margin past it.
+bool TraceTester::SightBlocked(const vec3& from, const vec3& to, const std::function<bool(UActor* actor)>& blocksSight)
+{
+	if (from == to)
+		return false;
+
+	dvec3 origin = to_dvec3(from);
+	dvec3 direction = to_dvec3(to) - origin;
+	double tmin = 0.01;
+	double tmax = length(direction);
+	if (tmax < tmin)
+		return false;
+	direction *= 1.0 / tmax;
+
+	CollisionHitList hits;
+	bool actorBlocks = VisitActorsOnRay(from, to, [&](UActor* actor) {
+		hits.clear();
+		TraceActor(actor, origin, tmin, direction, tmax, 0.0, 0.0, true, true, true, hits);
+		return !hits.empty() && blocksSight(actor);
+	});
+	if (actorBlocks)
+		return true;
+
+	TraceRayModel tracemodel;
+	return tracemodel.TraceAnyHit(GetLevel()->Model, origin, tmin, direction, tmax, true);
 }
 
 // The hit lies on the cylinder the trace actually swept against: the actor's cylinder grown by the
@@ -277,7 +322,7 @@ void TraceTester::TraceActor(UActor* actor, const dvec3& origin, double tmin, co
 	}
 	else
 	{
-		if (!traceActors || visibilityOnly)
+		if (!traceActors)
 			return;
 
 		double t = CylinderActorTrace(origin, tmin, dirNormalized, tmax, height, radius, actor);

@@ -199,6 +199,11 @@ public:
 
 	void InitVertexLight(VertexLight& vertexlight, UActor* actor, UZoneInfo* zoneActor);
 
+	// The level's lights whose reach may take in a location, as of the last
+	// frame drawn: BeginFrame builds their tree from each actor with a light
+	// type and a brightness. The list lasts until the next call.
+	const Array<UActor*>& LightsNear(const vec3& location) { LightTree.CollectLights(location, 0.0f); return LightTree.CollectedLights; }
+
 private:
 	TextureInfo GetLightmap(UModel* model, int lightmapIndex, const Coords& coords, UZoneInfo* zoneActor, const vec3& worldLocation, float radius, UMover* mover, bool specialLit);
 	TextureInfo GetFogmap(UModel* model, int lightmapIndex, const Coords& coords, UZoneInfo* zoneActor);

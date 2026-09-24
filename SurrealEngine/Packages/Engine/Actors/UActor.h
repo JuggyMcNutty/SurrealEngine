@@ -841,6 +841,7 @@ public:
 	float& LastConEndTime() { return Value<float>(PropOffsets_Actor.LastConEndTime); }
 	float& ConStartInterval() { return Value<float>(PropOffsets_Actor.ConStartInterval); }
 
+	BitfieldBool bDetectable() { return BoolValue(PropOffsets_Actor.bDetectable); }
 	float& VisUpdateTime() { return Value<float>(PropOffsets_Actor.VisUpdateTime); }
 	float& CurrentVisibility() { return Value<float>(PropOffsets_Actor.CurrentVisibility); }
 	float& LastVisibility() { return Value<float>(PropOffsets_Actor.LastVisibility); }

@@ -46,6 +46,12 @@ CollisionHitList CollisionSystem::TraceDecal(const dvec3& origin, double tmin, c
 	return trace.Trace(Level->Model, origin, tmin, dirNormalized, tmax, visibilityOnly);
 }
 
+bool CollisionSystem::SightBlocked(const vec3& from, const vec3& to, const std::function<bool(UActor* actor)>& blocksSight)
+{
+	TraceTester trace(this);
+	return trace.SightBlocked(from, to, blocksSight);
+}
+
 CollisionHit CollisionSystem::TraceFirstHit(const vec3& from, const vec3& to, UActor* tracingActor, const vec3& extents, const TraceFlags& flags)
 {
 	for (const CollisionHit& hit : Trace(from, to, extents.z, extents.x, flags.traceActors(), flags.traceWorld(), false))

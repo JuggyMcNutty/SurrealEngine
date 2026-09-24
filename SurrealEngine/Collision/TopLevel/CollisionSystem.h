@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Math/vec.h"
+#include <functional>
 
 class ULevel;
 class UActor;
@@ -31,6 +32,11 @@ public:
 	CollisionHitList Trace(const vec3& from, const vec3& to, float height, float radius, bool traceActors, bool traceWorld, bool visibilityOnly);
 	CollisionHitList TraceDecal(const dvec3& origin, double tmin, const dvec3& dirNormalized, double tmax, bool visibilityOnly);
 	CollisionHit TraceFirstHit(const vec3& from, const vec3& to, UActor* tracingActor, const vec3& extents, const TraceFlags& flags);
+
+	// Whether sight along a segment is blocked: by world and mover surfaces
+	// that block visibility, or by an actor on it that blocksSight says blocks
+	// (Deus Ex's AI line of sight).
+	bool SightBlocked(const vec3& from, const vec3& to, const std::function<bool(UActor* actor)>& blocksSight);
 
 	Array<UActor*> CollidingActors(const vec3& origin, float radius);
 	Array<UActor*> CollidingActors(const vec3& origin, float height, float radius);

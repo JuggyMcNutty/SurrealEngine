@@ -83,18 +83,15 @@ bool UScriptedPawn::HaveSeenCarcass(const NameString& CarcassName)
 	return false;
 }
 
+// A pawn this one could take on (DeusEx.dll AScriptedPawn::IsValidEnemy): any
+// pawn, the player too, but itself, one being destroyed, one AI cannot
+// detect or a dead one; and one of an alliance this pawn is hostile to, which
+// the original's exec function checks unless told not to.
 bool UScriptedPawn::IsValidEnemy(UPawn* TestEnemy, std::optional<bool> bCheckAlliance)
 {
-	if (!UObject::TryCast<UScriptedPawn>(TestEnemy) || TestEnemy == this || !bBlockSight() || bDeleteMe() || UObject::TryCast<UScriptedPawn>(TestEnemy)->KillCount() < 1)
+	if (!TestEnemy || TestEnemy == this || TestEnemy->bDeleteMe() || !TestEnemy->bDetectable() || TestEnemy->Health() <= 0)
 		return false;
-	if (bCheckAlliance)
-	{
-		uint8_t retval = GetPawnAllianceType(TestEnemy);
-		if (retval != (uint8_t)EAllianceType::ALLIANCE_Hostile)
-		{
-			return false;
-		}
-		return true;
-	}
-	return false;
+	if (bCheckAlliance.value_or(true) && GetPawnAllianceType(TestEnemy) != (uint8_t)EAllianceType::ALLIANCE_Hostile)
+		return false;
+	return true;
 }

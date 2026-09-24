@@ -181,10 +181,137 @@ float UPawn::AICanHear(UActor* other, std::optional<float> volume, std::optional
 	return 0.0f;
 }
 
-float UPawn::AICanSee(UActor* other, std::optional<float> visibility, std::optional<bool> bCheckVisibility, std::optional<bool> bCheckDir, std::optional<bool> bCheckCylinder, std::optional<bool> bCheckLOS)
+// How much of something size degrees across, angle degrees off the middle of
+// a field of view fov degrees wide, is inside it: 1 all of it, 0 none, falling
+// off linearly across the edge. From Engine.dll, where it serves
+// APawn::AICanSee.
+static float AIFieldOfViewShare(float angle, float fov, float size)
 {
-	LogUnimplemented("Pawn.AICanSee() [Deus Ex]");
-	return 0.0f;
+	while (angle <= -180.0f)
+		angle += 360.0f;
+	while (angle > 180.0f)
+		angle -= 360.0f;
+	if (angle < 0.0f)
+		angle = -angle;
+
+	float inner = (float)((fov - size) * 0.5);
+	float outer = inner + size;
+	if (angle > outer)
+		return 0.0f;
+	if (angle <= inner)
+		return 1.0f;
+	return 1.0f - (angle - inner) / size;
+}
+
+// How well this pawn sees another actor, 0 to 1, as Deus Ex's AI judges it
+// (Engine.dll APawn::AICanSee; the defaults are its exec function's). From
+// the eyes: how large the other looks -- nothing under MinAngularSize -- and,
+// with bCheckDir, how much of it is inside the view (AIHorizontalFov wide,
+// AspectRatio times narrower up and down, turned by AIAddViewRotation); with
+// bCheckVisibility, how lit it is (AIVisibility); less VisibilityThreshold.
+// With bCheckLOS, zero unless a line reaches it past the world and anything
+// that blocks sight: its middle, or with bCheckCylinder a player's eyes, its
+// top and its bottom, and anything else's sides.
+float UPawn::AICanSee(UActor* other, std::optional<float> visibilityArg, std::optional<bool> bCheckVisibilityArg, std::optional<bool> bCheckDirArg, std::optional<bool> bCheckCylinderArg, std::optional<bool> bCheckLOSArg)
+{
+	float visibility = visibilityArg.value_or(1.0f);
+	bool bCheckVisibility = bCheckVisibilityArg.value_or(true);
+	bool bCheckDir = bCheckDirArg.value_or(true);
+	bool bCheckCylinder = bCheckCylinderArg.value_or(false);
+	bool bCheckLOS = bCheckLOSArg.value_or(true);
+
+	if (!other || visibility <= 0.0f || !other->bDetectable())
+		return 0.0f;
+
+	vec3 eye = Location();
+	eye.z += BaseEyeHeight();
+	vec3 delta = other->Location() - eye;
+	double distSq = (double)delta.x * delta.x + (double)delta.y * delta.y + (double)delta.z * delta.z;
+	if (distSq < 1.0)
+		distSq = 1.0;
+
+	// Its apparent size squared, as the tangent of the angle it spans
+	double radiusSq = (double)other->CollisionRadius() * other->CollisionRadius();
+	double heightSq = (double)other->CollisionHeight() * other->CollisionHeight();
+	double sizeSq = (radiusSq + heightSq) / distSq;
+	if (sizeSq <= MinAngularSize())
+		return 0.0f;
+	if (sizeSq < 0.0003046792916483) // under a degree: its middle stands for it
+		bCheckCylinder = false;
+	visibility = (float)(visibility * sizeSq * 64.0);
+
+	if (bCheckDir && visibility > 0.0f)
+	{
+		float verticalFov = AspectRatio() > 0.0f ? AIHorizontalFov() / AspectRatio() : 0.0f;
+		float width = (float)(std::atan(std::sqrt(radiusSq / distSq)) * 114.59155902616465); // degrees across
+		float height = (float)(std::atan(std::sqrt(heightSq / distSq)) * 114.59155902616465);
+
+		Rotator view = (UObject::TryCast<UPlayerPawn>(this) ? ViewRotation() : Rotation()) + AIAddViewRotation();
+		Coords axes = Coords::Rotation(view);
+		vec3 local = { dot(delta, axes.XAxis), dot(delta, axes.YAxis), dot(delta, axes.ZAxis) };
+
+		// FVector::Rotation's yaw and pitch, in its whole units
+		const float unitsPerRadian = 65535.0f / (2.0f * 3.14159265358979f);
+		int yaw = (int)(std::atan2(local.y, local.x) * unitsPerRadian);
+		int pitch = (int)(std::atan2(local.z, std::sqrt(local.x * local.x + local.y * local.y)) * unitsPerRadian);
+		visibility *= AIFieldOfViewShare((float)(yaw * 360.0 / 65536.0), AIHorizontalFov(), width);
+		float vertical = AIFieldOfViewShare((float)(pitch * 360.0 / 65536.0), verticalFov, height);
+		if (distSq < 22500.0 && vertical < 0.75f) // within 150 units, above or below still shows
+			vertical = 0.75f;
+		visibility *= vertical;
+	}
+
+	if (bCheckVisibility && visibility > 0.0f)
+		visibility *= other->AIVisibility(true);
+
+	visibility -= VisibilityThreshold();
+	if (visibility < 0.0f)
+		visibility = 0.0f;
+	else if (visibility >= 1.0f)
+		visibility = 1.0f;
+
+	if (bCheckLOS && visibility > 0.0f)
+	{
+		// What blocks: any actor but this pawn, what owns it and the other,
+		// if it blocks sight and is not hidden
+		CollisionSystem& collision = XLevel()->Collision;
+		auto blocksSight = [&](UActor* actor) {
+			for (UActor* viewer = this; viewer; viewer = viewer->Owner())
+			{
+				if (actor == viewer)
+					return false;
+			}
+			return actor != other && actor->bBlockSight() && !actor->bHidden();
+		};
+		auto reaches = [&](const vec3& point) { return !collision.SightBlocked(eye, point, blocksSight); };
+
+		const vec3& center = other->Location();
+		bool seen;
+		if (!bCheckCylinder)
+		{
+			seen = reaches(center);
+		}
+		else
+		{
+			UPlayerPawn* player = UObject::TryCast<UPlayerPawn>(other);
+			seen = (player && reaches(center + vec3(0.0f, 0.0f, player->BaseEyeHeight()))) ||
+				reaches(center + vec3(0.0f, 0.0f, other->CollisionHeight())) ||
+				reaches(center - vec3(0.0f, 0.0f, other->CollisionHeight()));
+			if (!player && !seen)
+			{
+				// Its sides, square to the line to it
+				vec3 across = { delta.x, delta.y, 0.0f };
+				float lengthSq = dot(across, across);
+				across = lengthSq < 1e-8f ? vec3(0.0f) : across * (1.0f / std::sqrt(lengthSq));
+				float radius = other->CollisionRadius();
+				seen = reaches(center + vec3(across.y * radius, -across.x * radius, 0.0f)) ||
+					reaches(center + vec3(-across.y * radius, across.x * radius, 0.0f));
+			}
+		}
+		if (!seen)
+			visibility = 0.0f;
+	}
+	return visibility;
 }
 
 float UPawn::AICanSmell(UActor* other, std::optional<float> smell)
