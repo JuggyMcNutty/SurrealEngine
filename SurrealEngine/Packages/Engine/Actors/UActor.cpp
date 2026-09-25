@@ -2,6 +2,7 @@
 #include "Precomp.h"
 #include "UActor.h"
 #include "Packages/Core/UClass.h"
+#include "Packages/Core/Properties/UBoolProperty.h"
 #include "Packages/Engine/UViewport.h"
 #include "Packages/Engine/Actors/USpawnNotify.h"
 #include "Packages/Engine/Actors/Info/ULevelInfo.h"
@@ -60,6 +61,9 @@ UActor* UActor::Spawn(UClass* SpawnClass, std::optional<UActor*> SpawnOwner, std
 	actor->OldLocation() = location;
 	actor->Rotation() = rotation;
 	actor->Region().Zone = actor->Level();
+	// The original starts a spawned actor 10 s undrawn; the renderer keeps
+	// it from here.
+	actor->LastRenderTime() = Level()->TimeSeconds() - 10.0f;
 	actor->Index = (int)XLevel()->Actors.size();
 	XLevel()->Actors.push_back(actor);
 	XLevel()->ActorsVersion++;
@@ -171,11 +175,60 @@ bool UActor::Destroy()
 	return true;
 }
 
+bool UActor::InStasis()
+{
+	// The original's InStasis, all of which must hold: bStasis;
+	// bForceStasis, or physics none or rotating; not drawn for 5 s; its
+	// zone not drawn for 5 s, or more than 1,200 units from the player;
+	// single player, which the fork always is.
+	if (!bStasis())
+		return false;
+	if (!bForceStasis() && Physics() != PHYS_None && Physics() != PHYS_Rotating)
+		return false;
+	float now = Level()->TimeSeconds();
+	if (now - LastRenderTime() < 5.0f)
+		return false;
+	auto& zones = XLevel()->Model->Zones;
+	int zone = Region().ZoneNumber;
+	bool zoneDrawn = zone >= 0 && (size_t)zone < zones.size() && now - zones[zone].LastRenderTime < 5.0f;
+	return !zoneDrawn || DistanceFromPlayer() > 1200.0f;
+}
+
+bool UActor::IsTransient()
+{
+	if (!TransientPropSearched)
+	{
+		TransientPropSearched = 1;
+		for (UStruct* s = Class; s && TransientPropOffset.DataOffset == ~(size_t)0; s = s->StructParent)
+		{
+			for (UProperty* prop : s->Properties)
+			{
+				if (prop->Name == "bTransient" && UObject::TryCast<UBoolProperty>(prop))
+				{
+					TransientPropOffset = prop->DataOffset;
+					break;
+				}
+			}
+		}
+	}
+	return TransientPropOffset.DataOffset != ~(size_t)0 && BoolValue(TransientPropOffset);
+}
+
 void UActor::Tick(float elapsed)
 {
 	if (engine->LaunchInfo.IsDeusEx())
 	{
 		DistanceFromPlayer() = length(engine->viewport->Actor()->Location() - Location());
+
+		// The original's tick does nothing else for an actor in stasis --
+		// no script tick, physics, animation or timers -- and destroys a
+		// transient one (the rats a container lets out).
+		if (InStasis())
+		{
+			if (IsTransient())
+				Destroy();
+			return;
+		}
 	}
 
 	TickAnimation(elapsed);

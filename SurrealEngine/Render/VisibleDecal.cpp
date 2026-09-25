@@ -7,6 +7,7 @@
 #include "Packages/Engine/Resources/Level/UModel.h"
 #include "Packages/Engine/Resources/UPalette.h"
 #include "Packages/Engine/Actors/UDecal.h"
+#include "Packages/Engine/Actors/Info/ULevelInfo.h"
 #include "Engine.h"
 
 void VisibleDecal::DrawDecals(VisibleFrame* frame, BspNode* node)
@@ -15,6 +16,11 @@ void VisibleDecal::DrawDecals(VisibleFrame* frame, BspNode* node)
 	{
 		if (leveldecal.Decal->Texture())
 		{
+			// A drawn decal stamps its own LastRenderedTime, as the
+			// original's; LastRendered() reads LastRenderTime, which a
+			// decal never gets, so a decal never counts as drawn.
+			leveldecal.Decal->LastRenderedTime() = engine->LevelInfo->TimeSeconds();
+
 			engine->render->UpdateTexture(leveldecal.Decal->Texture());
 
 			UTexture* texture = leveldecal.Decal->Texture()->GetAnimTexture();

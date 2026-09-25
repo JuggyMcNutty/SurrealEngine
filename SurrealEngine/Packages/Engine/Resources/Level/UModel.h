@@ -90,6 +90,10 @@ public:
 	UActor* ZoneActor;
 	uint64_t Connectivity;
 	uint64_t Visibility;
+
+	// Runtime only: when the renderer last saw the zone (the camera's, and
+	// each zone a visible portal borders). Stasis and the AI events read it.
+	float LastRenderTime = 0.0f;
 };
 
 class LightMapIndex

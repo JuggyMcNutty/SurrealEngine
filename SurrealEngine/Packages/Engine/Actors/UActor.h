@@ -608,6 +608,14 @@ public:
 	int AiFramesSinceThought = 0;
 	float AiTimeSinceThought = 0.0f;
 
+	// Stasis, as the original's: whether the whole tick is skipped, and
+	// whether this actor carries Deus Ex's bTransient, a script property
+	// (its offset found once), so stasis destroys it.
+	bool InStasis();
+	bool IsTransient();
+	int8_t TransientPropSearched = 0;
+	PropertyDataOffset TransientPropOffset;
+
 	float SleepTimeLeft = 0.0f;
 	vec3 gravityVector;
 

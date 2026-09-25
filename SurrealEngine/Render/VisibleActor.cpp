@@ -8,6 +8,7 @@
 #include "Packages/Engine/UViewport.h"
 #include "Packages/Engine/Actors/Pawn/UPawn.h"
 #include "Packages/Engine/Actors/Pawn/UPlayerPawn.h"
+#include "Packages/Engine/Actors/Info/ULevelInfo.h"
 #include "Packages/Engine/Actors/Brush/UMover.h"
 
 void VisibleActor::Process(VisibleFrame* frame, UActor* actor)
@@ -57,6 +58,7 @@ void VisibleActor::Process(VisibleFrame* frame, UActor* actor)
 		return;
 
 	actor->LastVisibleFrame = frame->FrameCounter;
+	actor->LastRenderTime() = engine->LevelInfo->TimeSeconds();
 
 	EDrawType dt = (EDrawType)actor->DrawType();
 	if (dt == DT_Mesh && actor->Mesh())

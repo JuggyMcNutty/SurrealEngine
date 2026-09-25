@@ -36,6 +36,13 @@ void VisibleFrame::Process(const vec3& location, const mat4& worldToView, const 
 	//ViewZoneMask = ViewZone ? 1ULL << ViewZone : -1;
 	ViewRotation = viewRotation;
 
+	// The frame's own zone counts as seen (the original's OccludeBsp stamps
+	// it first); the zones behind visible portals are stamped as they pass
+	// the clipper (ProcessNodeSurface).
+	auto& zones = engine->Level->Model->Zones;
+	if ((size_t)ViewZone < zones.size())
+		zones[ViewZone].LastRenderTime = engine->LevelInfo->TimeSeconds();
+
 	OpaqueNodes.clear();
 	Actors.clear();
 	Translucents.clear();
@@ -310,11 +317,17 @@ void VisibleFrame::ProcessNodeSurface(BspNode* node, bool front)
 	if (!Clipper.CheckSurface(points, numverts, (PolyFlags & PF_NoOcclude) == 0))
 		return;
 
-	/*if (PolyFlags & PF_Portal)
+	// A visible portal surface means the zones it borders were seen: their
+	// render time is what stasis and the AI events read for actors there.
+	if (PolyFlags & PF_Portal)
 	{
-		ViewZoneMask |= 1ULL << node->Zone0;
-		ViewZoneMask |= 1ULL << node->Zone1;
-	}*/
+		auto& zones = engine->Level->Model->Zones;
+		float now = engine->LevelInfo->TimeSeconds();
+		if ((size_t)node->Zone0 < zones.size())
+			zones[node->Zone0].LastRenderTime = now;
+		if ((size_t)node->Zone1 < zones.size())
+			zones[node->Zone1].LastRenderTime = now;
+	}
 
 	if (PolyFlags & PF_Invisible)
 		return;

@@ -465,14 +465,11 @@ void NActor::IsOverlapping(UObject* Self, UObject* checkActor, BitfieldBool& Ret
 
 void NActor::LastRendered(UObject *Self, float &ReturnValue)
 {
-	if (UDecal* decal = UObject::TryCast<UDecal>(Self))  
-	{  
-		ReturnValue = decal->LastRenderedTime();  
-	}  
-	else  
-	{  
-		ReturnValue = 0.0f; // UActor no tiene LastRenderedTime  
-	}  
+	// The time since the actor was last drawn, never below 0. A decal's own
+	// LastRenderedTime is not read -- the original's does not either, so a
+	// decal (Deus Ex's Shadow) never counts as drawn.
+	UActor* SelfActor = UObject::Cast<UActor>(Self);
+	ReturnValue = std::max(0.0f, SelfActor->Level()->TimeSeconds() - SelfActor->LastRenderTime());
 }
 
 void NActor::LinkSkelAnim(UObject* Self, UObject* Anim)
@@ -892,8 +889,9 @@ void NActor::TraceThisActor_U227(UObject* Self, vec3& TraceEnd, vec3& TraceStart
 
 void NActor::InStasis(UObject* Self, BitfieldBool& ReturnValue)
 {
+	// Whether the actor is in stasis, not whether stasis is allowed.
 	UActor* SelfActor = UObject::Cast<UActor>(Self);
-	ReturnValue = SelfActor->bStasis() || SelfActor->bForceStasis();
+	ReturnValue = SelfActor->InStasis();
 }
 
 void NActor::ParabolicTrace(UObject* Self, vec3& finalLocation, std::optional<vec3> startVelocity, std::optional<vec3> startLocation, std::optional<bool> bCheckActors, std::optional<vec3> Cylinder, std::optional<float> maxTime, std::optional<float> elasticity, std::optional<bool> bBounce, std::optional<float> landingSpeed, std::optional<float> granularity, float& ReturnValue)  
