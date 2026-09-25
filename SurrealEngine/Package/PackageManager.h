@@ -52,6 +52,7 @@ public:
 
 	Package* GetPackage(const NameString& name);
 	Array<NameString> GetPackageNames() const;
+	void ScanSaveInfos();
 	Package* GetSaveInfoPackage(const NameString& saveFolderName);
 	void RemoveSaveInfoPackage(const NameString& saveFolderName);
 	std::map<NameString, Package*> GetSaveInfoPackages() const { return saveInfos; };
@@ -112,7 +113,6 @@ private:
 
 	void ScanFolder(const std::string& packagedir, const std::string& search);
 	void ScanPaths();
-	void ScanSaveInfos();
 
 	void DelayLoadNow();
 	void RegisterFunctions();

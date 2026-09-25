@@ -55,7 +55,7 @@ UObject* UDeusExPlayer::CreateLogObject()
 
 void UDeusExPlayer::DeleteSaveGameFiles(std::optional<std::string> saveDirectory)
 {
-	LogUnimplemented("DeusExPlayer.DeleteSaveGameFiles");
+	engine->DeleteSaveGameFiles(saveDirectory.value_or(""));
 }
 
 std::string UDeusExPlayer::GetDeusExVersion()
@@ -66,7 +66,7 @@ std::string UDeusExPlayer::GetDeusExVersion()
 void UDeusExPlayer::SaveGame(int saveIndex, std::optional<std::string> saveDesc)
 {
 	engine->SaveGameInfo.SaveGameSlot = saveIndex;
-	engine->SaveGameInfo.SaveGameDescription = *saveDesc;
+	engine->SaveGameInfo.SaveGameDescription = saveDesc.value_or("");
 }
 
 NameString UDeusExPlayer::SetBoolFlagFromString(const std::string& flagNameString, bool bValue)

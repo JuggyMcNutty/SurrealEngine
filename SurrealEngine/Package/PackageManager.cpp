@@ -545,6 +545,9 @@ void PackageManager::ScanPaths()
 
 void PackageManager::ScanSaveInfos()
 {
+	if (!fs::exists(gameSaveFolderPath) || !fs::is_directory(gameSaveFolderPath))
+		return;
+
 	for (const auto& entry : fs::directory_iterator{gameSaveFolderPath})
 	{
 		if (!entry.is_directory())
@@ -557,7 +560,10 @@ void PackageManager::ScanSaveInfos()
 
 		auto saveFolderName = entry.path().filename().string();
 
-		saveInfos[saveFolderName] = GC::Alloc<Package>(this, saveFolderName, save.string());
+		// A folder already loaded keeps its package; a writer that changes
+		// one evicts it with RemoveSaveInfoPackage.
+		if (saveInfos.find(saveFolderName) == saveInfos.end())
+			saveInfos[saveFolderName] = GC::Alloc<Package>(this, saveFolderName, save.string());
 	}
 }
 

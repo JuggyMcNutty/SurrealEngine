@@ -78,6 +78,14 @@ public:
 	void LoadMap(const UnrealURL& url, const std::map<std::string, std::string>& travelInfo = {});
 	void LoadFromSaveFile(const UnrealURL& url);
 	void SaveGameToSlot(int32_t slotNum, const std::string& saveDescription) const;
+	// Deus Ex's save directories (docs/re/deusex-dll.md, travel and saving):
+	// Save%04d a slot, QuickSave (-1) the quick save, Current (-2) the
+	// mission in progress.
+	std::string SaveSlotFolderName(int32_t slot) const;
+	int32_t NextSaveSlot() const;
+	void CopySaveGameFiles(const std::string& fromFolder, const std::string& toFolder) const;
+	void DeleteSaveGameFiles(const std::string& folder) const;
+	void DeleteGame(int32_t slot) const;
 	void UnloadMap();
 	void LoginPlayer();
 	void PossessSavedPlayer();

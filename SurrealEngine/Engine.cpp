@@ -49,6 +49,7 @@
 #include "Packages/ConSys/Events/UConEventTransferObject.h"
 #include "Packages/ConSys/Events/UConEventCheckObject.h"
 #include "Packages/DeusEx/UDeusExLevelInfo.h"
+#include "Packages/DeusEx/UDeusExPlayer.h"
 #include "Packages/DeusEx/UDeusExSaveInfo.h"
 #include "ObjectTravelInfo.h"
 #include "Math/quaternion.h"
@@ -93,7 +94,7 @@ Engine::Engine(GameLaunchInfo launchinfo) : LaunchInfo(launchinfo)
 		dxgc->Canvas() = canvas;
 		// In package DeusEx, not transient: Package::Save refuses an object
 		// from another package, so a transient save info stopped every save.
-		dxSaveInfo = UObject::Cast<UDXSaveInfo>(deusExPackage->NewObject("DeusExSaveInfo", deusExPackage->GetClass("DeusExSaveInfo"), ObjectFlags::NoFlags));
+		dxSaveInfo = UObject::Cast<UDXSaveInfo>(deusExPackage->NewObject("MyDeusExSaveInfo", deusExPackage->GetClass("DeusExSaveInfo"), ObjectFlags::NoFlags));
 		dxConMissionList = UObject::Cast<UConversationMissionList>(packages->GetPackage("DeusExConText")->GetUObject("ConversationMissionList", "ConMissionList"));
 	}
 
@@ -901,31 +902,51 @@ void Engine::SaveGameToSlot(int32_t slotNum, const std::string& saveDescription)
 
 	if (packages->IsDeusEx())
 	{
-		// Saving a game on Deus Ex does the following:
-		// - Create a folder using the slotNum (e.g. 1 -> "Save0001")
-		// - Save the level package using the name [MapName].dxs
-		// - Save the associated DeusExSaveInfo class as SaveInfo.dxs within that same folder,
-		// in which saveDescription parameter will be used in DeusExSaveInfo.Description
-		auto slotNumStr = std::to_string(slotNum);
-		slotNumStr.insert(0, 4 - slotNumStr.length(), '0'); // Pad it with 0s
-		auto saveFolder = "Save" + slotNumStr;
-
-		auto saveSlotFolder = saveFolderPath / saveFolder;
-		if (!fs::exists(saveSlotFolder) || !fs::is_directory(saveSlotFolder))
+		// The original's SaveGame (docs/re/deusex-dll.md, travel and saving):
+		// slot 0 is a new slot, the highest SaveNNNN plus one; -1 the quick
+		// save. The slot is emptied, Current copied in, the SaveInfo filled
+		// and written to the slot (and to Current, which keeps one of its
+		// own), and the level saved on top of the copy.
+		if (slotNum == 0)
+			slotNum = NextSaveSlot();
+		const auto slotFolderName = SaveSlotFolderName(slotNum);
+		DeleteSaveGameFiles(slotFolderName);
+		const auto saveSlotFolder = saveFolderPath / slotFolderName;
+		if (!fs::exists(saveSlotFolder))
 			fs::create_directory(saveSlotFolder);
-
-		auto levelName = Level->package->GetPackageName().ToString() + "." + packages->GetSaveExtension();
-		auto saveInfoName = "SaveInfo." + packages->GetSaveExtension();
-		auto saveFileFullPath = (saveSlotFolder / levelName).string();
-		auto saveInfoFullPath = (saveSlotFolder / saveInfoName).string();
-		LevelPackage->Save(Level, saveFileFullPath);
+		CopySaveGameFiles("Current", slotFolderName);
 
 		dxSaveInfo->DirectoryIndex() = slotNum;
-		dxSaveInfo->Description() = saveDescription;
+		dxSaveInfo->Description() = !saveDescription.empty() ? saveDescription : LevelInfo->Title();
 		dxSaveInfo->MissionLocation() = DeusExLevelInfo ? DeusExLevelInfo->MissionLocation() : "";
 		dxSaveInfo->MapName() = Level->package->GetPackageName().ToString();
+		if (auto player = UObject::TryCast<UDeusExPlayer>(viewport->Actor()))
+		{
+			dxSaveInfo->SaveCount() = ++player->saveCount();
+			dxSaveInfo->SaveTime() = (int)player->saveTime();
+			dxSaveInfo->bCheatsEnabled() = (bool)player->bCheatsEnabled();
+		}
 		dxSaveInfo->UpdateTimeStamp();
-		deusExPackage->Save(dxSaveInfo, saveInfoFullPath);
+
+		// The copy from Current is overwritten in place: the file goes first,
+		// or the writer keeps it as a .old beside it, which no original save
+		// carries.
+		const auto saveInfoName = "SaveInfo." + packages->GetSaveExtension();
+		fs::remove(saveSlotFolder / saveInfoName);
+		deusExPackage->Save(dxSaveInfo, (saveSlotFolder / saveInfoName).string());
+		const auto currentFolder = saveFolderPath / "Current";
+		if (fs::exists(currentFolder))
+		{
+			fs::remove(currentFolder / saveInfoName);
+			deusExPackage->Save(dxSaveInfo, (currentFolder / saveInfoName).string());
+		}
+
+		const auto levelName = Level->package->GetPackageName().ToString() + "." + packages->GetSaveExtension();
+		fs::remove(saveSlotFolder / levelName);
+		LevelPackage->Save(Level, (saveSlotFolder / levelName).string());
+
+		packages->RemoveSaveInfoPackage(slotFolderName);
+		packages->RemoveSaveInfoPackage("Current");
 	}
 	else
 	{
@@ -937,6 +958,84 @@ void Engine::SaveGameToSlot(int32_t slotNum, const std::string& saveDescription)
 		// map name, so record the real map name here for LoadFromSaveFile() to recover.
 		packages->SetIniValue("user", "SaveGame", "MapName" + std::to_string(slotNum), Level->package->GetPackageName().ToString());
 	}
+}
+
+std::string Engine::SaveSlotFolderName(int32_t slot) const
+{
+	if (slot == -1)
+		return "QuickSave";
+	if (slot == -2)
+		return "Current";
+	std::string s = std::to_string(slot);
+	if (s.length() < 4)
+		s.insert(0, 4 - s.length(), '0');
+	return "Save" + s;
+}
+
+// The next slot is the highest existing SaveNNNN plus one, never a gap.
+int32_t Engine::NextSaveSlot() const
+{
+	int32_t highest = 0;
+	const auto saveFolderPath = packages->GetSaveFolderPath();
+	if (fs::exists(saveFolderPath))
+	{
+		for (const auto& entry : fs::directory_iterator(saveFolderPath))
+		{
+			if (!entry.is_directory())
+				continue;
+			const std::string name = entry.path().filename().string();
+			if (name.size() < 5 || name.compare(0, 4, "Save") != 0 || name[4] < '0' || name[4] > '9')
+				continue;
+			try
+			{
+				highest = std::max(highest, Convert::to_int32(name.substr(4)));
+			}
+			catch (...)
+			{
+			}
+		}
+	}
+	return highest + 1;
+}
+
+void Engine::CopySaveGameFiles(const std::string& fromFolder, const std::string& toFolder) const
+{
+	const auto saveFolderPath = packages->GetSaveFolderPath();
+	const auto from = saveFolderPath / fromFolder;
+	const auto to = saveFolderPath / toFolder;
+	if (!fs::exists(from) || !fs::is_directory(from))
+		return;
+	if (!fs::exists(to))
+		fs::create_directories(to);
+	for (const auto& entry : fs::directory_iterator(from))
+	{
+		if (entry.is_regular_file() && entry.path().extension() != ".old")
+			fs::copy_file(entry.path(), to / entry.path().filename(), fs::copy_options::overwrite_existing);
+	}
+}
+
+// The folder's files, the folder itself kept; "" means Current, as the
+// original's DeleteSaveGameFiles.
+void Engine::DeleteSaveGameFiles(const std::string& folder) const
+{
+	const std::string name = folder.empty() ? "Current" : folder;
+	const auto dir = packages->GetSaveFolderPath() / name;
+	if (!fs::exists(dir) || !fs::is_directory(dir))
+		return;
+	for (const auto& entry : fs::directory_iterator(dir))
+	{
+		if (entry.is_regular_file())
+			fs::remove(entry.path());
+	}
+	packages->RemoveSaveInfoPackage(name);
+}
+
+// Removes the slot with its contents, for the DELETEGAME console command.
+void Engine::DeleteGame(int32_t slot) const
+{
+	const std::string name = SaveSlotFolderName(slot);
+	fs::remove_all(packages->GetSaveFolderPath() / name);
+	packages->RemoveSaveInfoPackage(name);
 }
 
 std::map<std::string, std::string> Engine::CreateTravelInfo(bool transferItems)
@@ -1292,6 +1391,18 @@ std::string Engine::ConsoleCommand(UObject* context, const std::string& commandl
 		// SaveGameToSlot(slotNum, "");
 
 		//LogMessage("SaveGame command not fully implemented yet!");
+		return {};
+	}
+	else if (command == "deletegame" && args.size() == 2)
+	{
+		// The Load and Save Game screens delete a save with DELETEGAME n.
+		try
+		{
+			DeleteGame(Convert::to_int32(args[1]));
+		}
+		catch (...)
+		{
+		}
 		return {};
 	}
 	else if (command == "get" && args.size() == 3)
