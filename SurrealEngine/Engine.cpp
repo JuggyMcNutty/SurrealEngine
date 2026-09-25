@@ -201,6 +201,41 @@ void Engine::Run()
 
 		UpdateInput(realTimeElapsed);
 
+		SetPause(!LevelInfo->Pauser().empty());
+
+		// Do NOT pause this Tick event otherwise some messages will stay on screen forever.
+		CallEvent(console, EventName::Tick, { ExpressionValue::FloatValue(levelElapsed) });
+
+		// To do: set these to true if the frame rate is too low
+		if (LaunchInfo.ue1Version >= 436)
+		{
+			LevelInfo->bDropDetail() = false;
+			LevelInfo->bAggressiveLOD() = false;
+		}
+
+		if (EntryLevel)
+			EntryLevel->Tick(entryLevelElapsed, m_GamePaused);
+		Level->Tick(levelElapsed, m_GamePaused);
+
+		if (dxRootWindow)
+			dxRootWindow->Tick(levelElapsed); // Should this maybe be realTimeElapsed?
+
+		// To do: improve CallEvent so parameter passing isn't this painful
+		UFunction* funcPlayerCalcView = viewport->Actor() ? FindEventFunction(viewport->Actor(), "PlayerCalcView") : nullptr;
+		if (funcPlayerCalcView)
+		{
+			vecprop->Struct = UObject::Cast<UStructProperty>(funcPlayerCalcView->Properties[1])->Struct;
+			rotprop->Struct = UObject::Cast<UStructProperty>(funcPlayerCalcView->Properties[2])->Struct;
+			CameraActor = viewport->Actor();
+			CameraLocation = viewport->Actor()->Location();
+			CameraRotation = viewport->Actor()->Rotation();
+			CameraFovAngle = viewport->Actor()->FovAngle();
+			CallEvent(viewport->Actor(), EventName::PlayerCalcView, {
+				ExpressionValue::Variable(&CameraActor, objprop),
+				ExpressionValue::Variable(&CameraLocation, vecprop),
+				ExpressionValue::Variable(&CameraRotation, rotprop)
+				});
+		}
 
 		UpdateAudio();
 
