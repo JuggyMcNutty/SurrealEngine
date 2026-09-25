@@ -467,6 +467,14 @@ void VisibleFrame::DrawCoronas()
 	frame2d.WorldToView = mat4::identity();
 	Device->SetSceneNode(&frame2d);
 
+	// Deus Ex coronas are kept and faded across frames, from the viewer's
+	// leaf, not gathered from the drawn parts of the level
+	if (engine->LaunchInfo.IsDeusEx())
+	{
+		engine->render->DrawCoronasDX(this);
+		return;
+	}
+
 	for (VisibleCorona &corona : Coronas)
 		corona.Draw(this);
 }

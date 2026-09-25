@@ -13,20 +13,11 @@
 
 void VisibleActor::Process(VisibleFrame* frame, UActor* actor)
 {
-	if (actor->bCorona())
+	// Deus Ex coronas come from the viewer's leaf and are kept across
+	// frames (RenderSubsystem::DrawCoronasDX), not gathered here
+	if (actor->bCorona() && !engine->LaunchInfo.IsDeusEx())
 	{
-		if (engine->LaunchInfo.IsDeusEx())
-		{
-			// There seems to be more to this check than simply the distance. But this will do for now.
-			vec3 v = actor->Location() - frame->ViewLocation.xyz();
-			float d = 2000.0f;
-			if (dot(v, v) < d * d)
-				frame->Coronas.push_back(actor);
-		}
-		else
-		{
-			frame->Coronas.push_back(actor);
-		}
+		frame->Coronas.push_back(actor);
 	}
 
 	if (actor->bHidden())

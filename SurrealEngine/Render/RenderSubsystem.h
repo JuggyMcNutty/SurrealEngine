@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VisibleFrame.h"
+#include <chrono>
 
 class RenderDevice;
 class UWindow;
@@ -56,6 +57,20 @@ public:
 	// pass; each scene frame draws the items their iterators list
 	// (VisibleFrame::ProcessRenderIterators).
 	Array<UActor*> IteratorActors;
+
+	// Deus Ex coronas as the original's (docs/re/render-dll.md, coronas):
+	// up to 32 kept from frame to frame, each with a brightness 0 to 1,
+	// fading on real time. The dynamic corona lights are gathered by
+	// DrawScene's actor pass; the static ones come from the viewer's leaf.
+	struct CoronaState
+	{
+		UActor* Light = nullptr;
+		float Brightness = 0.0f;
+	};
+	Array<CoronaState> CoronaStates;
+	Array<UActor*> CoronaDynamicLights;
+	std::chrono::steady_clock::time_point CoronaLastUpdate = {};
+	void DrawCoronasDX(VisibleFrame* frame);
 
 	vec3* GetTempVertexBuffer(size_t count)
 	{
