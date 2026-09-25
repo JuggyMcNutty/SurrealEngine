@@ -5,10 +5,14 @@
 #include "RenderSubsystem.h"
 #include "RenderDevice/RenderDevice.h"
 #include "Packages/Engine/UViewport.h"
+#include "Packages/Engine/URenderIterator.h"
 #include "Packages/Engine/Resources/Level/UModel.h"
+#include "Packages/Engine/Resources/Textures/UTexture.h"
+#include "Packages/Engine/Resources/Mesh/UMesh.h"
 #include "Packages/Engine/Actors/Info/UWarpZoneInfo.h"
 #include "Packages/Engine/Actors/Info/USkyZoneInfo.h"
 #include "Packages/Engine/Actors/Info/ULevelInfo.h"
+#include "Packages/Engine/Actors/Pawn/UPlayerPawn.h"
 #include "Packages/Extension/Windows/TabGroup/URootWindow.h"
 
 void VisibleFrame::Process(const vec3& location, const mat4& worldToView, const Coords& viewRotation, bool mirrorFlag, int portalDepth, const Array<PortalSpan>& portalSpans, const vec4& portalPlane)
@@ -49,7 +53,77 @@ void VisibleFrame::Process(const vec3& location, const mat4& worldToView, const 
 	Coronas.clear();
 	Portals.clear();
 
+	// Before the BSP walk: the clipper's spans fill as surfaces draw, so a
+	// test after it would cull everything; here it clips items to the view
+	// (and a portal's spans) only.
+	ProcessRenderIterators();
+
 	ProcessNode(&engine->Level->Model->Nodes[0]);
+}
+
+void VisibleFrame::ProcessRenderIterators()
+{
+	// An actor with a RenderIteratorClass is drawn as the items its
+	// iterator lists, and gets no sprite of its own. Each scene frame: Init
+	// with the viewer, First, then until IsDone an item for the actor
+	// CurrentItem gives, and Next. The iterators move one proxy actor from
+	// item to item, so each item keeps what the proxy was as it was listed
+	// (docs/re/render-dll.md, render iterators).
+	UPlayerPawn* viewer = UObject::TryCast<UPlayerPawn>(engine->viewport->Actor());
+	for (UActor* actor : engine->render->IteratorActors)
+	{
+		if (actor->bDeleteMe())
+			continue;
+		URenderIterator* iterator = actor->RenderInterface();
+		if (!iterator)
+			continue;
+
+		iterator->Init(viewer);
+		iterator->First();
+		while (!iterator->IsDone())
+		{
+			UActor* item = iterator->CurrentItem();
+			iterator->Next();
+			if (!item)
+				continue;
+
+			EDrawType dt = (EDrawType)item->DrawType();
+			float extent;
+			if (dt == DT_Mesh && item->Mesh())
+			{
+				// A proxy is a plain effect with no collision, so size the
+				// box from the mesh itself
+				const BBox& meshBox = item->Mesh()->BoundingBox;
+				extent = std::max(length(meshBox.extents()) * item->DrawScale(), item->CollisionRadius() + item->CollisionHeight());
+			}
+			else if ((dt == DT_Sprite || dt == DT_SpriteAnimOnce) && item->Texture())
+			{
+				UTexture* texture = item->Texture();
+				extent = std::max(texture->USize(), texture->VSize()) * item->DrawScale() * 0.5f;
+			}
+			else
+			{
+				continue;
+			}
+
+			vec3 location = item->Location();
+			if (!Clipper.IsAABBVisible(BBox(location - vec3(extent), location + vec3(extent))))
+				continue;
+
+			item->LastRenderTime() = engine->LevelInfo->TimeSeconds();
+
+			VisibleIteratorItem visitem;
+			visitem.Actor = item;
+			visitem.Type = dt;
+			visitem.Location = location;
+			visitem.Rotation = item->Rotation();
+			visitem.DrawScale = item->DrawScale();
+			visitem.ScaleGlow = item->ScaleGlow();
+
+			vec3 v = location - ViewLocation.xyz();
+			Translucents.emplace_back(visitem, dot(v, v));
+		}
+	}
 }
 
 void VisibleFrame::SetupSceneFrame(const mat4& worldToView)

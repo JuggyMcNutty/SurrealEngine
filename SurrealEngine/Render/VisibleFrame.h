@@ -38,6 +38,7 @@ private:
 	void SetupSceneFrame(const mat4& worldToView);
 	void ProcessNode(BspNode* node);
 	void ProcessNodeSurface(BspNode* node, bool front);
+	void ProcessRenderIterators();
 	void SortTranslucent();
 
 	void DrawOpaqueNodes();

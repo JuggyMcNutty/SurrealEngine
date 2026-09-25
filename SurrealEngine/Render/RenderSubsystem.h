@@ -52,6 +52,11 @@ public:
 	// last frame.
 	int SceneFrameStart = 0;
 
+	// The actors with a live render iterator, gathered by DrawScene's actor
+	// pass; each scene frame draws the items their iterators list
+	// (VisibleFrame::ProcessRenderIterators).
+	Array<UActor*> IteratorActors;
+
 	vec3* GetTempVertexBuffer(size_t count)
 	{
 		if (VertexBuffer.size() < count)
@@ -92,6 +97,7 @@ public:
 
 private:
 	void DrawScene();
+	void UpdateRenderInterface(UActor* actor);
 
 	void ResetCanvas();
 	void PreRender();

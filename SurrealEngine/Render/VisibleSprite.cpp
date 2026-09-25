@@ -11,9 +11,12 @@
 
 void VisibleSprite::Draw(VisibleFrame* frame, UActor* actor)
 {
+	Draw(frame, actor, actor->Location(), actor->DrawScale(), actor->ScaleGlow());
+}
+
+void VisibleSprite::Draw(VisibleFrame* frame, UActor* actor, const vec3& location, float drawscale, float scaleglow)
+{
 	UTexture* texture = actor->Texture();
-	const vec3& location = actor->Location();
-	float drawscale = actor->DrawScale();
 	int style = actor->Style();
 	bool noSmooth = actor->bNoSmooth();
 
@@ -72,7 +75,7 @@ void VisibleSprite::Draw(VisibleFrame* frame, UActor* actor)
 	vec3 sideAxis = frame->ViewRotation.YAxis * (texwidth * drawscale);
 	vec3 upAxis = frame->ViewRotation.ZAxis * (texheight * drawscale);
 
-	vec3 color = clamp(actor->ScaleGlow(), 0.0f, 1.0f);
+	vec3 color = clamp(scaleglow, 0.0f, 1.0f);
 
 	GouraudVertex vertices[4];
 	vertices[0].Point = location - sideAxis - upAxis;

@@ -21,6 +21,7 @@ class U227AnimationNotify;
 class CollisionHit;
 class CollisionHitList;
 class BspNode;
+class URenderIterator;
 
 struct PointRegion
 {
@@ -713,7 +714,7 @@ public:
 	uint8_t& RemoteRole() { return Value<uint8_t>(PropOffsets_Actor.RemoteRole); }
 	float& LastRenderTime() { return Value<float>(PropOffsets_Actor.LastRenderTime); }
 	float& DistanceFromPlayer() { return Value<float>(PropOffsets_Actor.DistanceFromPlayer); }
-	//URenderIterator*& RenderInterface() { return Value<URenderIterator*>(PropOffsets_Actor.RenderInterface); }
+	URenderIterator*& RenderInterface() { return Value<URenderIterator*>(PropOffsets_Actor.RenderInterface); }
 	UClass*& RenderIteratorClass() { return Value<UClass*>(PropOffsets_Actor.RenderIteratorClass); }
 	uint8_t& Role() { return Value<uint8_t>(PropOffsets_Actor.Role); }
 	Rotator& Rotation() { return Value<Rotator>(PropOffsets_Actor.Rotation); }

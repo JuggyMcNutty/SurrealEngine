@@ -126,6 +126,8 @@ set(SURREALCOMMON_SOURCES
 	SurrealEngine/Render/VisibleDecal.h
 	SurrealEngine/Render/VisibleFrame.cpp
 	SurrealEngine/Render/VisibleFrame.h
+	SurrealEngine/Render/VisibleIteratorItem.cpp
+	SurrealEngine/Render/VisibleIteratorItem.h
 	SurrealEngine/Render/VisibleMesh.cpp
 	SurrealEngine/Render/VisibleMesh.h
 	SurrealEngine/Render/VisibleNode.cpp
@@ -480,6 +482,10 @@ set(SURREALCOMMON_SOURCES
 	SurrealEngine/Packages/DeusEx/UDeusExSaveInfo.h
 	SurrealEngine/Packages/DeusEx/UGameDirectory.cpp
 	SurrealEngine/Packages/DeusEx/UGameDirectory.h
+	SurrealEngine/Packages/DeusEx/ULaserIterator.cpp
+	SurrealEngine/Packages/DeusEx/ULaserIterator.h
+	SurrealEngine/Packages/DeusEx/UParticleIterator.cpp
+	SurrealEngine/Packages/DeusEx/UParticleIterator.h
 	SurrealEngine/Packages/DeusEx/UScriptedPawn.cpp
 	SurrealEngine/Packages/DeusEx/UScriptedPawn.h
 	SurrealEngine/Packages/DeusExText/UDeusExTextParser.cpp
@@ -508,6 +514,7 @@ set(SURREALCOMMON_SOURCES
 	SurrealEngine/Packages/Engine/UEventManager.cpp
 	SurrealEngine/Packages/Engine/UEventManager.h
 	SurrealEngine/Packages/Engine/UPlayer.h
+	SurrealEngine/Packages/Engine/URenderIterator.cpp
 	SurrealEngine/Packages/Engine/URenderIterator.h
 	SurrealEngine/Packages/Engine/USurrealClient.cpp
 	SurrealEngine/Packages/Engine/USurrealClient.h

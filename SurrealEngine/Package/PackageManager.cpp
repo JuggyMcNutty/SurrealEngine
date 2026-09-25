@@ -77,6 +77,8 @@
 #include "Packages/DeusEx/UDeusExPlayer.h"
 #include "Packages/DeusEx/UDeusExSaveInfo.h"
 #include "Packages/DeusEx/UGameDirectory.h"
+#include "Packages/DeusEx/ULaserIterator.h"
+#include "Packages/DeusEx/UParticleIterator.h"
 #include "Packages/DeusEx/UScriptedPawn.h"
 #include "Packages/DeusExText/UDeusExTextParser.h"
 #include "Packages/Emitter/UDistantLightActor.h"
@@ -1179,6 +1181,12 @@ void PackageManager::RegisterNativeClasses()
 	{
 		RegisterNativeClass<UCommandlet>(corePackage, "Commandlet", "Object");
 		RegisterNativeClass<USimpleCommandlet>(corePackage, "SimpleCommandlet", "Commandlet");
+	}
+
+	// Deus Ex (ue1Version 500) has render iterators too: its particles and
+	// laser beams are drawn through them (docs/re/deusex-dll.md).
+	if (launchInfo.ue1Version < 400 || IsDeusEx())
+	{
 		RegisterNativeClass<URenderIterator>(enginePackage, "RenderIterator", "Object");
 	}
 
@@ -1379,6 +1387,8 @@ void PackageManager::RegisterNativeClasses()
 		RegisterNativeClass<UDeusExPlayer>(deusExPackage, "DeusExPlayer", "PlayerPawnExt");
 		RegisterNativeClass<UScriptedPawn>(deusExPackage, "ScriptedPawn", "Pawn");
 		RegisterNativeClass<UDeusExDecoration>(deusExPackage, "DeusExDecoration", "Decoration");
+		RegisterNativeClass<UParticleIterator>(deusExPackage, "ParticleIterator", "RenderIterator");
+		RegisterNativeClass<ULaserIterator>(deusExPackage, "LaserIterator", "RenderIterator");
 		RegisterNativeClass<UConLight>(conSysPackage, "ConLight", "Light");
 		RegisterNativeClass<UConObject>(conSysPackage, "ConObject", "Object");
 		RegisterNativeClass<UConAudioList>(conSysPackage, "ConAudioList", "ConObject");

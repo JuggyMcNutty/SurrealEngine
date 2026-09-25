@@ -6,6 +6,9 @@
 #include "VM/ScriptCall.h"
 #include "Engine.h"
 #include "VisibleFrame.h"
+#include "Package/PackageManager.h"
+#include "Packages/Core/UClass.h"
+#include "Packages/Engine/URenderIterator.h"
 #include "Packages/Engine/Actors/Pawn/UPawn.h"
 #include "Packages/Extension/Windows/UViewportWindow.h"
 #include "Packages/Extension/Windows/TabGroup/URootWindow.h"
@@ -19,10 +22,24 @@ void RenderSubsystem::DrawScene()
 	TextureFrameCounter++;
 
 	// Make sure all actors are at the right location in the BSP
+	IteratorActors.clear();
+	// Only where the RenderIterator native class is registered (its
+	// registration in PackageManager matches this condition)
+	bool hasRenderIterators = (engine->LaunchInfo.ue1Version < 400 || engine->LaunchInfo.IsDeusEx()) &&
+		PropOffsets_Actor.RenderInterface.DataOffset != ~(size_t)0 &&
+		PropOffsets_Actor.RenderIteratorClass.DataOffset != ~(size_t)0;
 	for (UActor* actor : engine->Level->Actors)
 	{
 		if (actor)
+		{
 			actor->UpdateBspInfo();
+			if (hasRenderIterators)
+			{
+				UpdateRenderInterface(actor);
+				if (actor->RenderInterface())
+					IteratorActors.push_back(actor);
+			}
+		}
 	}
 
 	mat4 worldToView = Coords::ViewToRenderDev().ToMatrix() * Coords::Rotation(engine->CameraRotation).Inverse().ToMatrix() * Coords::Location(engine->CameraLocation).ToMatrix();
@@ -30,6 +47,30 @@ void RenderSubsystem::DrawScene()
 	MainFrame.Process(engine->CameraLocation, worldToView, Coords::Rotation(engine->CameraRotation));
 	MainFrame.Draw();
 	MainFrame.DrawCoronas();
+}
+
+void RenderSubsystem::UpdateRenderInterface(UActor* actor)
+{
+	// Without a RenderInterface, or with one that is no longer valid, the
+	// renderer makes one: an object of the actor's RenderIteratorClass with
+	// the actor as its outer. With the class cleared, the one there is goes
+	// (docs/re/render-dll.md, render iterators).
+	UClass* cls = actor->RenderIteratorClass();
+	URenderIterator*& iterator = actor->RenderInterface();
+	if (!cls)
+	{
+		iterator = nullptr;
+		return;
+	}
+	if (iterator && iterator->Class != cls)
+		iterator = nullptr;
+	if (!iterator)
+	{
+		UObject* obj = engine->packages->GetTransientPackage()->NewObject(cls->Name, cls, ObjectFlags::Transient);
+		iterator = UObject::TryCast<URenderIterator>(obj);
+		if (iterator)
+			iterator->Outer() = actor;
+	}
 }
 
 void RenderSubsystem::DrawViewport(UViewportWindow* viewport)

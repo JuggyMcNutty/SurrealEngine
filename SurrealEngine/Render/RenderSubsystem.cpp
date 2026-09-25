@@ -151,4 +151,5 @@ void RenderSubsystem::OnMapLoaded()
 {
 	Device->Flush(true);
 	engine->Level->Light.OnMapLoaded();
+	IteratorActors.clear();
 }
