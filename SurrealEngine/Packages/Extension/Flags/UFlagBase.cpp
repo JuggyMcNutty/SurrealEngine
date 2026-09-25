@@ -12,14 +12,41 @@
 #include "Packages/Extension/Flags/UFlagRotator.h"
 #include "Packages/Extension/Flags/UFlagVector.h"
 
+// A CRC of the flag's name in upper case, as the original hashes it: the
+// buckets are the CRC modulo 64, and each chain is kept in order of hash,
+// then type, so there is no limit to the flags. The original's exact CRC
+// polynomial was not read; it only matters for reading the original game's
+// own saved flag chains, to be pinned when those saves load at all.
+static uint32_t FlagNameCrc(const NameString& name)
+{
+	static uint32_t table[256];
+	static bool made = false;
+	if (!made)
+	{
+		for (uint32_t i = 0; i < 256; i++)
+		{
+			uint32_t c = i;
+			for (int k = 0; k < 8; k++)
+				c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+			table[i] = c;
+		}
+		made = true;
+	}
+	uint32_t crc = 0xFFFFFFFFu;
+	for (char ch : name.ToString())
+	{
+		uint8_t c = (uint8_t)std::toupper((unsigned char)ch);
+		crc = table[(crc ^ c) & 0xFF] ^ (crc >> 8);
+	}
+	return ~crc;
+}
+
 UFlag* UFlagBase::GetFlag(const NameString& flagName, uint8_t flagType)
 {
-	// To do: calculate a proper hash and use it
-
-	auto table = hashTable();
-	for (const auto flag : hashTable())
+	const int bucket = (int)(FlagNameCrc(flagName) % HashTableSize);
+	for (UFlag* flag = hashTable()[bucket]; flag; flag = flag->nextFlag())
 	{
-		if (flag && flag->FlagName() == flagName && flag->flagType() == flagType)
+		if (flag->FlagName() == flagName && flag->flagType() == flagType)
 			return flag;
 	}
 	return nullptr;
@@ -27,12 +54,17 @@ UFlag* UFlagBase::GetFlag(const NameString& flagName, uint8_t flagType)
 
 bool UFlagBase::DeleteFlag(const NameString& FlagName, uint8_t flagType)
 {
+	const int bucket = (int)(FlagNameCrc(FlagName) % HashTableSize);
 	auto table = hashTable();
-	for (int i = 0; i < table.size(); i++)
+	UFlag* prev = nullptr;
+	for (UFlag* flag = table[bucket]; flag; prev = flag, flag = flag->nextFlag())
 	{
-		if (table[i] && table[i]->FlagName() == FlagName && table[i]->flagType() == flagType)
+		if (flag->FlagName() == FlagName && flag->flagType() == flagType)
 		{
-			table[i] = nullptr;
+			if (prev)
+				prev->nextFlag() = flag->nextFlag();
+			else
+				table[bucket] = flag->nextFlag();
 			return true;
 		}
 	}
@@ -42,13 +74,37 @@ bool UFlagBase::DeleteFlag(const NameString& FlagName, uint8_t flagType)
 void UFlagBase::DeleteAllFlags()
 {
 	auto table = hashTable();
-	for (int i = 0; i < table.size(); i++)
+	for (int i = 0; i < HashTableSize; i++)
 		table[i] = nullptr;
 }
 
+// Deletes every flag whose expiration is not 0 and at most the criteria;
+// an expiration of 0 never expires. The mission scripts call this with the
+// mission's number on a level reached by travel.
 void UFlagBase::DeleteExpiredFlags(int criteria)
 {
-	LogUnimplemented("FlagBase.DeleteExpiredFlags");
+	auto table = hashTable();
+	for (int i = 0; i < HashTableSize; i++)
+	{
+		UFlag* prev = nullptr;
+		UFlag* flag = table[i];
+		while (flag)
+		{
+			UFlag* next = flag->nextFlag();
+			if (flag->expiration() != 0 && flag->expiration() <= criteria)
+			{
+				if (prev)
+					prev->nextFlag() = next;
+				else
+					table[i] = next;
+			}
+			else
+			{
+				prev = flag;
+			}
+			flag = next;
+		}
+	}
 }
 
 bool UFlagBase::CheckFlag(const NameString& FlagName, uint8_t flagType)
@@ -79,24 +135,29 @@ bool UFlagBase::GetNextFlag(int Iterator, NameString& FlagName, uint8_t& flagTyp
 	FlagName = {}; // ResetFlags() expects this to be set to '' if no more flags were found
 
 	auto it = FlagIterators.find(Iterator);
-	if (it == FlagIterators.end() || it->second.HashPos == HashTableSize)
+	if (it == FlagIterators.end())
 		return false;
 
 	auto table = hashTable();
 	FlagIterator& flagIt = it->second;
 
-	for (int i = flagIt.HashPos; i < HashTableSize; i++)
+	while (flagIt.HashPos < HashTableSize)
 	{
-		if (table[i] && (!flagIt.FlagTypeSet || table[i]->flagType() == flagIt.FlagType))
+		UFlag* flag = flagIt.NextFlag ? flagIt.NextFlag : table[flagIt.HashPos];
+		while (flag && flagIt.FlagTypeSet && flag->flagType() != flagIt.FlagType)
+			flag = flag->nextFlag();
+		if (flag)
 		{
-			FlagName = table[i]->FlagName();
-			flagType = table[i]->flagType();
-			flagIt.HashPos = i + 1;
+			FlagName = flag->FlagName();
+			flagType = flag->flagType();
+			flagIt.NextFlag = flag->nextFlag();
+			if (!flagIt.NextFlag)
+				flagIt.HashPos++;
 			return true;
 		}
+		flagIt.NextFlag = nullptr;
+		flagIt.HashPos++;
 	}
-
-	flagIt.HashPos = HashTableSize;
 	return false;
 }
 
@@ -122,9 +183,10 @@ uint8_t UFlagBase::GetByte(const NameString& FlagName)
 
 int UFlagBase::GetExpiration(const NameString& FlagName, uint8_t flagType)
 {
-	if (UFlag* flag = GetFlag(FlagName, (uint8_t)EFlagType::Bool))
+	// -1 for a flag that is not there, as the original answers.
+	if (UFlag* flag = GetFlag(FlagName, flagType))
 		return flag->expiration();
-	return 0;
+	return -1;
 }
 
 float UFlagBase::GetFloat(const NameString& FlagName)
@@ -176,7 +238,9 @@ void UFlagBase::SetExpiration(const NameString& FlagName, uint8_t flagType, int 
 template<typename T>
 T* UFlagBase::GetOrCreateFlag(const NameString& FlagName, std::optional<bool> bAdd, std::optional<int> expiration, EFlagType flagType, const char* flagClassName)
 {
-	int newExpiration = expiration ? *expiration : defaultFlagExpiration();
+	// The expiration is stamped each set: the one given, or the flag base's
+	// default for -1 (the script's own default argument).
+	int newExpiration = (!expiration || *expiration == -1) ? defaultFlagExpiration() : *expiration;
 
 	// Try get the flag
 	if (auto flag = UObject::Cast<T>(GetFlag(FlagName, (uint8_t)flagType)))
@@ -200,19 +264,35 @@ T* UFlagBase::GetOrCreateFlag(const NameString& FlagName, std::optional<bool> bA
 				throw std::runtime_error(std::string("Could not find class ") + flagClassName);
 		}
 
+		const uint32_t crc = FlagNameCrc(FlagName);
+		const int bucket = (int)(crc % HashTableSize);
+		auto flag = UObject::Cast<T>(engine->packages->GetTransientPackage()->NewObject(FlagName, cls, ObjectFlags::Transient));
+		flag->FlagName() = FlagName;
+		flag->FlagBase() = this;
+		flag->flagType() = (uint8_t)flagType; // the class defaults leave it 0, Bool
+		flag->flagHash() = (int)crc;
+		flag->expiration() = newExpiration;
+
+		// The chain is kept in order of hash, then type.
 		auto table = hashTable();
-		for (int i = 0; i < table.size(); i++)
+		UFlag* prev = nullptr;
+		for (UFlag* it = table[bucket]; it; prev = it, it = it->nextFlag())
 		{
-			if (!table[i])
-			{
-				auto flag = UObject::Cast<T>(engine->packages->GetTransientPackage()->NewObject(FlagName, cls, ObjectFlags::Transient));
-				flag->FlagName() = FlagName;
-				flag->flagHash() = i; // Lets pretend until we have a proper hash
-				table[i] = flag;
-				return flag;
-			}
+			if ((uint32_t)it->flagHash() > crc ||
+				((uint32_t)it->flagHash() == crc && it->flagType() > (uint8_t)flagType))
+				break;
 		}
-		LogMessage("Could not create flag " + FlagName.ToString() + ": no room in FlagBase.HashTable");
+		if (prev)
+		{
+			flag->nextFlag() = prev->nextFlag();
+			prev->nextFlag() = flag;
+		}
+		else
+		{
+			flag->nextFlag() = table[bucket];
+			table[bucket] = flag;
+		}
+		return flag;
 	}
 
 	return nullptr;
