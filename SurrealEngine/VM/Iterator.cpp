@@ -4,6 +4,7 @@
 #include "Packages/Core/UClass.h"
 #include "Utils/File.h"
 #include "Utils/StrTools.h"
+#include "Packages/Engine/Actors/Info/ULevelInfo.h"
 #include "Engine.h"
 #include "Package/PackageManager.h"
 #include "Packages/Engine/Resources/Level/ULevel.h"
@@ -518,85 +519,119 @@ bool ZoneActorsIterator::Next()
 
 /////////////////////////////////////////////////////////////////////////////
 
-TraceTextureIterator::TraceTextureIterator(UObject* BaseClass, UObject** OutActor, NameString* TexName, NameString* TexGroup, int* Flags, vec3& HitLoc, vec3& HitNorm, vec3 End, vec3* Start, vec3* Extent)
-	: BaseClass(BaseClass), OutActor(OutActor), TexName(TexName), TexGroup(TexGroup), flags(Flags), HitLoc(HitLoc), HitNorm(HitNorm),
-	End(End), Start(Start), m_Extent(Extent)
+// The original's MultiLineCheck under the two Deus Ex trace iterators:
+// the level's BSP first -- its hit's actor the LevelInfo -- with the line
+// shortened to 5 units past the wall; then the actors along what is left,
+// up to 64 hits in all, nearest first. Nothing beyond the first wall.
+static CollisionHitList DeusExMultiLineCheck(const vec3& start, const vec3& end, const vec3& extent, bool visibilityOnly)
 {
-	auto radius = m_Extent ? length(m_Extent->xy()) : 0;
-	auto height = m_Extent ? ( m_Extent->z < 0 ? -m_Extent->z : m_Extent->z ) : 0;
+	float radius = length(extent.xy());
+	float height = std::abs(extent.z);
+	CollisionHitList all = engine->Level->Collision.Trace(start, end, height, radius, true, true, visibilityOnly);
 
-	m_CollList = engine->Level->Collision.Trace(*Start, End, height, radius, true, true, false);
+	CollisionHit wall;
+	bool haveWall = false;
+	for (const CollisionHit& hit : all)
+	{
+		if (hit.Node)
+		{
+			wall = hit;
+			haveWall = true;
+			break;
+		}
+	}
+	float limit = 1.0f;
+	if (haveWall)
+	{
+		float lineLength = length(end - start);
+		limit = lineLength > 0.0f ? std::min(1.0f, wall.Fraction + 5.0f / lineLength) : wall.Fraction;
+	}
 
+	CollisionHitList result;
+	int count = 0;
+	for (const CollisionHit& hit : all)
+	{
+		if (count >= 64 || hit.Fraction > limit)
+			break;
+		if (hit.Node)
+		{
+			if (haveWall && hit.Node == wall.Node && hit.Fraction == wall.Fraction)
+			{
+				CollisionHit levelHit = hit;
+				levelHit.Actor = engine->LevelInfo;
+				result.push_back(levelHit);
+				count++;
+			}
+			continue;
+		}
+		result.push_back(hit);
+		count++;
+	}
+	return result;
+}
+
+TraceTextureIterator::TraceTextureIterator(UObject* BaseClass, UObject** OutActor, NameString* TexName, NameString* TexGroup, int* Flags, vec3* HitLoc, vec3* HitNorm, const vec3& End, const vec3& Start, const vec3& Extent)
+	: OutActor(OutActor), TexName(TexName), TexGroup(TexGroup), flags(Flags), HitLoc(HitLoc), HitNorm(HitNorm), End(End), Start(Start)
+{
+	m_CollList = DeusExMultiLineCheck(Start, End, Extent, false);
 	m_Iterator = m_CollList.begin();
 }
 
 bool TraceTextureIterator::Next()
 {
-	while (m_Iterator != m_CollList.end())
+	if (m_Iterator == m_CollList.end())
 	{
-		UTexture* foundTexture = nullptr;
-
-		*OutActor = m_Iterator->Actor;
-		const auto node = m_Iterator->Node;
-
-		HitLoc = mix(*Start, End, m_Iterator->Fraction);
-
-		HitNorm = m_Iterator->Normal;
-
-		if (node)
-			foundTexture = engine->Level->Model->Surfaces[node->Surf].Material;
-		else if (*OutActor && (*OutActor)->IsA(BaseClass->Name))
-			foundTexture = UObject::Cast<UActor>(*OutActor)->Skin();
-
-		++m_Iterator;
-
-		if (foundTexture)
-		{
-			*TexName = foundTexture->Name;
-			*TexGroup = foundTexture->Outer() ? foundTexture->Outer()->Name : "";
-			*flags = foundTexture->PolyFlags();
-			return true;
-		}
+		*OutActor = nullptr;
+		return false;
 	}
+	const CollisionHit& hit = *m_Iterator;
+	++m_Iterator;
 
-	*OutActor = nullptr;
-	TexName = nullptr;
-	TexGroup = nullptr;
-	flags = nullptr;
-	return false;
+	// Every hit, in turn. A hit on the level gives the texture of the
+	// surface hit, its group (the texture's outer) and the surface's
+	// PolyFlags; an actor, no texture and flags 0.
+	*OutActor = hit.Actor;
+	*HitLoc = mix(Start, End, hit.Fraction);
+	*HitNorm = hit.Normal;
+	if (hit.Node)
+	{
+		const BspSurface& surface = engine->Level->Model->Surfaces[hit.Node->Surf];
+		UTexture* texture = surface.Material;
+		*TexName = texture ? texture->Name : NameString();
+		*TexGroup = texture && texture->Outer() ? texture->Outer()->Name : NameString();
+		*flags = surface.PolyFlags;
+	}
+	else
+	{
+		*TexName = NameString();
+		*TexGroup = NameString();
+		*flags = 0;
+	}
+	return true;
 }
 
 /////////////////////////////////////////////////////////////////////////////
 
-TraceVisibleActorsIterator::TraceVisibleActorsIterator(UObject* BaseClass, UObject** OutActor, vec3& HitLoc, vec3& HitNorm, vec3 End, vec3* Start, vec3* Extent)
-	: BaseClass(BaseClass), OutActor(OutActor), HitLoc(HitLoc), HitNorm(HitNorm),  End(End), Start(Start), m_Extent(Extent)
+TraceVisibleActorsIterator::TraceVisibleActorsIterator(UObject* BaseClass, UObject** OutActor, vec3* HitLoc, vec3* HitNorm, const vec3& End, const vec3& Start, const vec3& Extent)
+	: OutActor(OutActor), HitLoc(HitLoc), HitNorm(HitNorm), End(End), Start(Start)
 {
-	auto radius = m_Extent ? length(m_Extent->xy()) : 0;
-	auto height = m_Extent ? ( m_Extent->z < 0 ? -m_Extent->z : m_Extent->z ) : 0;
-
-	m_CollList = engine->Level->Collision.Trace(*Start, End, height, radius, true, true, false);
-
+	m_CollList = DeusExMultiLineCheck(Start, End, Extent, true);
 	m_Iterator = m_CollList.begin();
 }
 
 bool TraceVisibleActorsIterator::Next()
 {
-	while (m_Iterator != m_CollList.end())
+	if (m_Iterator == m_CollList.end())
 	{
-		auto foundActor = m_Iterator->Actor;
-
-		HitLoc = mix(*Start, End, m_Iterator->Fraction);
-		HitNorm = m_Iterator->Normal;
-
-		++m_Iterator;
-
-		if (foundActor && foundActor->IsA(BaseClass->Name) && !foundActor->bHidden())
-		{
-			*OutActor = foundActor;
-			return true;
-		}
+		*OutActor = nullptr;
+		return false;
 	}
+	const CollisionHit& hit = *m_Iterator;
+	++m_Iterator;
 
-	*OutActor = nullptr;
-	return false;
+	*OutActor = hit.Actor;
+	*HitLoc = mix(Start, End, hit.Fraction);
+	*HitNorm = hit.Normal;
+	return true;
 }
+

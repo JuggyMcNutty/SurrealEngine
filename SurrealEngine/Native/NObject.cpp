@@ -1628,10 +1628,13 @@ void NObject::TransformRotatorByNormal_U227(Rotator& R, vec3& FloorNormal, Rotat
 
 void NObject::VRand(vec3& ReturnValue)
 {
+	// The original keeps the points it draws inside the unit sphere, which
+	// lean nowhere; those outside lean toward the cube's diagonals.
 	while (true)
 	{
 		vec3 randomVector = vec3(FRandRange(-1.0f, 1.0f), FRandRange(-1.0f, 1.0f), FRandRange(-1.0f, 1.0f));
-		if (dot(randomVector, randomVector) >= 1.0f)
+		float lengthSq = dot(randomVector, randomVector);
+		if (lengthSq > 0.0f && lengthSq <= 1.0f)
 		{
 			ReturnValue = normalize(randomVector);
 			break;

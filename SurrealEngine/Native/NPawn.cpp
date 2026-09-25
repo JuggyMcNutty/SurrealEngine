@@ -362,14 +362,26 @@ void NPawn::ReachablePathnodes(UObject* Self, UObject* BaseClass, UObject*& NavP
 
 void NPawn::StrafeFacing_Deus(UObject* Self, const vec3& NewDestination, UObject* NewTarget, std::optional<float> speed)
 {
-	// speed is never used
+	// Deus Ex's strafe: the speed, 1 by default (the scripts give none),
+	// caps an NPC's DesiredSpeed while a player keeps MaxDesiredSpeed, and
+	// bReducedSpeed clears. It needs a target, faces it and looks at where
+	// it is.
 	UPawn* SelfPawn = UObject::Cast<UPawn>(Self);
-	SelfPawn->StrafeFacing(NewDestination, UObject::Cast<UActor>(NewTarget));
+	UActor* target = UObject::Cast<UActor>(NewTarget);
+	if (!target)
+		return;
+	SelfPawn->bReducedSpeed() = false;
+	SelfPawn->DesiredSpeed() = SelfPawn->bIsPlayer() ? SelfPawn->MaxDesiredSpeed() : std::clamp(SelfPawn->MaxDesiredSpeed(), 0.0f, speed.value_or(1.0f));
+	SelfPawn->Focus() = target->Location();
+	SelfPawn->StrafeFacing(NewDestination, target);
 }
 
 void NPawn::StrafeTo_Deus(UObject* Self, const vec3& NewDestination, const vec3& NewFocus, std::optional<float> speed)
 {
-	// speed is never used
+	// Deus Ex's strafe: an NPC's DesiredSpeed is its MaxDesiredSpeed held
+	// to at most the speed (1 by default: all of it, not the 0.8 the base
+	// strafe gives).
 	UPawn* SelfPawn = UObject::Cast<UPawn>(Self);
 	SelfPawn->StrafeTo(NewDestination, NewFocus);
+	SelfPawn->DesiredSpeed() = SelfPawn->bIsPlayer() ? SelfPawn->MaxDesiredSpeed() : std::clamp(SelfPawn->MaxDesiredSpeed(), 0.0f, speed.value_or(1.0f));
 }

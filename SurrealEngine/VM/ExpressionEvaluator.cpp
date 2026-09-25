@@ -1,5 +1,6 @@
 
 #include "Precomp.h"
+#include "Utils/StrTools.h"
 #include "ExpressionEvaluator.h"
 #include "Expression.h"
 #include "Bytecode.h"
@@ -628,7 +629,17 @@ void ExpressionEvaluator::Expr(StringToIntExpression* expr)
 
 void ExpressionEvaluator::Expr(StringToBoolExpression* expr)
 {
-	*Out = ExpressionValue::BoolValue(std::atoi(Value(expr->Value).ToString().c_str()));
+	// The original: true for "True", false for "False" in any case, and
+	// otherwise true for a number other than 0.
+	std::string v = Value(expr->Value).ToString();
+	bool result;
+	if (StrTools::equals_ignore_case(v, "True"))
+		result = true;
+	else if (StrTools::equals_ignore_case(v, "False"))
+		result = false;
+	else
+		result = std::atof(v.c_str()) != 0.0;
+	*Out = ExpressionValue::BoolValue(result);
 }
 
 void ExpressionEvaluator::Expr(StringToFloatExpression* expr)
@@ -638,32 +649,37 @@ void ExpressionEvaluator::Expr(StringToFloatExpression* expr)
 
 void ExpressionEvaluator::Expr(StringToVectorExpression* expr)
 {
+	// The original reads a number at the start, after the first comma and
+	// after the second; a part that is missing is 0.
 	std::string v = Value(expr->Value).ToString();
-	auto pos1 = v.find_first_of(',');
-	auto pos2 = v.find_first_of(',', pos1 + 1);
-	if (pos1 != std::string::npos && pos2 != std::string::npos)
+	float parts[3] = { 0.0f, 0.0f, 0.0f };
+	size_t pos = 0;
+	for (int i = 0; i < 3; i++)
 	{
-		*Out = ExpressionValue::VectorValue({ (float)std::atof(v.substr(0, pos1).c_str()), (float)std::atof(v.substr(pos1 + 1, pos2 - pos1 - 1).c_str()), (float)std::atof(v.substr(pos2 + 1).c_str()) });
+		parts[i] = (float)std::atof(v.c_str() + pos);
+		pos = v.find(',', pos);
+		if (pos == std::string::npos)
+			break;
+		pos++;
 	}
-	else
-	{
-		*Out = ExpressionValue::VectorValue({ 0.0f });
-	}
+	*Out = ExpressionValue::VectorValue({ parts[0], parts[1], parts[2] });
 }
 
 void ExpressionEvaluator::Expr(StringToRotatorExpression* expr)
 {
+	// As the vector: what is there is read, and a missing part is 0.
 	std::string v = Value(expr->Value).ToString();
-	auto pos1 = v.find_first_of(',');
-	auto pos2 = v.find_first_of(',', pos1 + 1);
-	if (pos1 != std::string::npos && pos2 != std::string::npos)
+	int parts[3] = { 0, 0, 0 };
+	size_t pos = 0;
+	for (int i = 0; i < 3; i++)
 	{
-		*Out = ExpressionValue::RotatorValue({ std::atoi(v.substr(0, pos1).c_str()), std::atoi(v.substr(pos1 + 1, pos2 - pos1 - 1).c_str()), std::atoi(v.substr(pos2 + 1).c_str()) });
+		parts[i] = std::atoi(v.c_str() + pos);
+		pos = v.find(',', pos);
+		if (pos == std::string::npos)
+			break;
+		pos++;
 	}
-	else
-	{
-		*Out = ExpressionValue::RotatorValue({ 0, 0, 0 });
-	}
+	*Out = ExpressionValue::RotatorValue({ parts[0], parts[1], parts[2] });
 }
 
 void ExpressionEvaluator::Expr(VectorToBoolExpression* expr)
@@ -693,7 +709,8 @@ void ExpressionEvaluator::Expr(IntToStringExpression* expr)
 
 void ExpressionEvaluator::Expr(BoolToStringExpression* expr)
 {
-	*Out = ExpressionValue::StringValue(std::to_string(Value(expr->Value).ToBool()));
+	// The original makes it "True" or "False", not 1 or 0.
+	*Out = ExpressionValue::StringValue(Value(expr->Value).ToBool() ? "True" : "False");
 }
 
 void ExpressionEvaluator::Expr(FloatToStringExpression* expr)
@@ -703,8 +720,20 @@ void ExpressionEvaluator::Expr(FloatToStringExpression* expr)
 
 void ExpressionEvaluator::Expr(ObjectToStringExpression* expr)
 {
+	// The original prints an object's path name: its outers' names and its
+	// own, dot-joined, from its package.
 	UObject* obj = Value(expr->Value).ToObject();
-	*Out = ExpressionValue::StringValue(obj ? obj->package->GetPackageName().ToString() + "." + obj->Name.ToString() : "None");
+	if (!obj)
+	{
+		*Out = ExpressionValue::StringValue("None");
+		return;
+	}
+	std::string path = obj->Name.ToString();
+	for (UObject* outer = obj->Outer(); outer; outer = outer->Outer())
+		path = outer->Name.ToString() + "." + path;
+	if (!obj->Outer() && obj->package)
+		path = obj->package->GetPackageName().ToString() + "." + path;
+	*Out = ExpressionValue::StringValue(path);
 }
 
 void ExpressionEvaluator::Expr(NameToStringExpression* expr)
@@ -720,8 +749,9 @@ void ExpressionEvaluator::Expr(VectorToStringExpression* expr)
 
 void ExpressionEvaluator::Expr(RotatorToStringExpression* expr)
 {
+	// The original prints the parts as they are, not wrapped to 0-65535.
 	Rotator v = Value(expr->Value).ToRotator();
-	*Out = ExpressionValue::StringValue(std::to_string(v.Pitch & 0xffff) + "," + std::to_string(v.Yaw & 0xffff) + "," + std::to_string(v.Roll & 0xffff));
+	*Out = ExpressionValue::StringValue(std::to_string(v.Pitch) + "," + std::to_string(v.Yaw) + "," + std::to_string(v.Roll));
 }
 
 void ExpressionEvaluator::Expr(StringToNameExpression* expr)

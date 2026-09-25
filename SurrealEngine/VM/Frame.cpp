@@ -257,7 +257,9 @@ ExpressionValue Frame::Call(UFunction* func, UObject* instance, CallArguments& a
 		EventName eventName = {};
 		func->EventIndex = NameStringToEventName(func->Name, eventName) ? (int)eventName : -1;
 	}
-	bool enabled = func->EventIndex >= 0 ? instance->IsEventEnabled((EventName)func->EventIndex) : instance->IsNonEventEnabled(func->Name);
+	// A script call of a function named after a probe runs only with its
+	// bit set; any other call runs, nothing checked, as the original's.
+	bool enabled = func->EventIndex >= 0 ? instance->IsEventEnabled((EventName)func->EventIndex) : true;
 	if (!enabled)
 	{
 		return ExpressionValue::NothingValue();

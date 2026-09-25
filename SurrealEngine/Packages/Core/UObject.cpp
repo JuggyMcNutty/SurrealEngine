@@ -110,13 +110,8 @@ void UObject::Load(ObjectStream* stream)
 			LogMessage("UObject::Load encountered object with a state object but no function");
 		}
 
-		for (int i = 0; i < 64; i++)
-		{
-			if ((probeMask >> i) & 1)
-			{
-				DisableEvent(ToNameString((EventName)i));
-			}
-		}
+		// The enabled probes, as the original's FStateFrame keeps them.
+		CurrentProbeMask = (uint64_t)probeMask;
 	}
 
 	if (!UObject::TryCast<UClass>(this))
@@ -144,14 +139,8 @@ void UObject::Save(PackageStreamWriter* stream)
 		int32_t latentAction = 0;
 		int offset = -1;
 
-		int64_t probeMask = 0;
-		for (int i = 0; i < 64; i++)
-		{
-			if (IsEventDisabled((EventName)i))
-			{
-				probeMask |= 1ULL << (uint64_t)i;
-			}
-		}
+		// The enabled probes, as the original's FStateFrame writes them.
+		int64_t probeMask = (int64_t)CurrentProbeMask;
 
 		// A StateFrame can outlive its state: GotoState("") (what a bTriggerOnceOnly mover does
 		// once it has fired) keeps the frame but sets Func to null, while LatentState is left at
@@ -369,72 +358,51 @@ bool UObject::IsA(const NameString& className) const
 
 bool UObject::IsEventEnabled(const NameString& name) const
 {
+	// An event of a probe, or a script call of a function named after one,
+	// runs only with its bit set; any other call runs, nothing checked.
 	EventName eventName = {};
 	if (NameStringToEventName(name, eventName))
-	{
 		return IsEventEnabled(eventName);
-	}
-	else
+	return true;
+}
+
+// The probes the state or the class has a function for, less those the
+// state ignores.
+uint64_t UObject::ComputeProbeMask() const
+{
+	uint64_t mask = Class ? Class->ProbeMask : ~0ULL;
+	if (StateFrame && StateFrame->Func)
 	{
-		return IsNonEventEnabled(name);
+		UState* state = static_cast<UState*>(StateFrame->Func);
+		mask = (mask | state->ProbeMask) & state->IgnoreMask;
 	}
+	return mask;
 }
 
-bool UObject::IsNonEventEnabled(const NameString& name) const
+void UObject::EnableEvent(const NameString& name)
 {
-	// Every script call asks: most objects have nothing disabled
-	if (DisabledEvents.empty())
-		return true;
-	NameString stateName = GetStateName();
-	auto it = DisabledEvents.find(stateName);
-	return it == DisabledEvents.end() || it->second.find(name) == it->second.end();
-}
-
-bool UObject::IsEventEnabled(EventName name) const
-{
-	int nameIndex = (int)name;
-	if (nameIndex < 64) // Probe event
+	// Sets the bit, if the state or the class has a function for the probe
+	// and the state does not ignore it. A name that is not a probe is only
+	// logged, as the original's.
+	EventName eventName = {};
+	if (!NameStringToEventName(name, eventName) || (int)eventName >= 64)
 	{
-		bool foundProbe = false;
-		if (StateFrame && StateFrame->Func)
-		{
-			UState* state = static_cast<UState*>(StateFrame->Func);
-
-			// Probe is in the ignore list ('ignores' keyword in unrealscript)
-			if ((state->IgnoreMask & (1ULL << nameIndex)) == 0)
-			{
-				return false;
-			}
-
-			// We have a function for the probe
-			if ((state->ProbeMask & (1ULL << nameIndex)) != 0)
-			{
-				foundProbe = true;
-			}
-		}
-
-		// Maybe the class has a function for our probe?
-		if ((Class->ProbeMask & (1ULL << nameIndex)) != 0)
-		{
-			foundProbe = true;
-		}
-
-		if (!foundProbe)
-			return false;
+		LogMessage("Enable: '" + name.ToString() + "' is not a probe function");
+		return;
 	}
-
-	if (DisabledEvents.empty())
-		return true;
-	NameString stateName = GetStateName();
-	auto it = DisabledEvents.find(stateName);
-	return it == DisabledEvents.end() || it->second.find(ToNameString(name)) == it->second.end();
+	CurrentProbeMask |= ComputeProbeMask() & (1ULL << (int)eventName);
 }
 
-bool UObject::IsEventDisabled(EventName name) const
+void UObject::DisableEvent(const NameString& name)
 {
-	NameString stateName = GetStateName();
-	auto it = DisabledEvents.find(stateName);
-	return it != DisabledEvents.end() && it->second.find(ToNameString(name)) != it->second.end();
+	// Clears the probe's bit until the next GotoState.
+	EventName eventName = {};
+	if (!NameStringToEventName(name, eventName) || (int)eventName >= 64)
+	{
+		LogMessage("Disable: '" + name.ToString() + "' is not a probe function");
+		return;
+	}
+	CurrentProbeMask &= ~(1ULL << (int)eventName);
 }
 
 std::string UObject::PrintProperties()
@@ -541,6 +509,11 @@ void UObject::GotoState(NameString stateName, const NameString& labelName)
 
 	if (oldState != newState)
 		StateFrame->SetState(newState);
+
+	// The mask is set at every GotoState, even into the state the object
+	// is in: the probes the state or the class has a function for, less
+	// those the state ignores.
+	CurrentProbeMask = ComputeProbeMask();
 
 	if (newState)
 	{

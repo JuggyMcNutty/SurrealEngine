@@ -309,30 +309,16 @@ public:
 
 	bool IsA(const NameString& className) const;
 
+	// The original keeps one 64-bit probe mask on the object, set afresh at
+	// every GotoState -- the probes the state or the class has a function
+	// for, less those the state ignores -- and checks nothing else: any
+	// call that is not a probe runs.
 	bool IsEventEnabled(const NameString& name) const;
-	bool IsEventEnabled(EventName name) const;
-	// IsEventEnabled for a name already known not to be an EventName
-	bool IsNonEventEnabled(const NameString& name) const;
-	bool IsEventDisabled(EventName name) const;
-
-	void EnableEvent(const NameString& name)
-	{
-		// A state with nothing disabled has no entry, so an object with nothing
-		// disabled anywhere has an empty DisabledEvents
-		auto it = DisabledEvents.find(GetStateName());
-		if (it != DisabledEvents.end())
-		{
-			it->second.erase(name);
-			if (it->second.empty())
-				DisabledEvents.erase(it);
-		}
-	}
-
-	void DisableEvent(const NameString& name)
-	{
-		NameString stateName = GetStateName();
-		DisabledEvents[stateName].insert(name);
-	}
+	bool IsEventEnabled(EventName name) const { return (int)name >= 64 || ((CurrentProbeMask >> (int)name) & 1); }
+	uint64_t ComputeProbeMask() const;
+	void EnableEvent(const NameString& name);
+	void DisableEvent(const NameString& name);
+	uint64_t CurrentProbeMask = ~0ULL;
 
 	NameString GetStateName() const;
 	void GotoState(NameString stateName, const NameString& labelName);
@@ -342,7 +328,6 @@ public:
 	Array<UProperty*> GetAllUserEditableProperties();
 	Array<UProperty*> GetAllTravelProperties();
 
-	std::map<NameString, std::set<NameString>> DisabledEvents;
 
 	std::unique_ptr<ObjectDelayLoad> DelayLoad;
 

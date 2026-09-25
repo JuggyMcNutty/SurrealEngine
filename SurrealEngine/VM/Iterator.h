@@ -259,22 +259,24 @@ public:
 };
 
 // Added in Deus Ex
+// The two Deus Ex trace iterators run over the original's MultiLineCheck:
+// the level's BSP first, its hit's actor the LevelInfo, the line shortened
+// to 5 units past the wall, then the actors along what is left, up to 64
+// hits nearest first. BaseClass is read and not used.
 class TraceTextureIterator : public Iterator
 {
 public:
-	TraceTextureIterator(UObject* BaseClass, UObject** OutActor, NameString* TexName, NameString* TexGroup, int* Flags, vec3& HitLoc, vec3& HitNorm, vec3 End, vec3* Start, vec3* Extent);
+	TraceTextureIterator(UObject* BaseClass, UObject** OutActor, NameString* TexName, NameString* TexGroup, int* Flags, vec3* HitLoc, vec3* HitNorm, const vec3& End, const vec3& Start, const vec3& Extent);
 	bool Next() override;
 
-	UObject* BaseClass = nullptr;
 	UObject** OutActor = nullptr;
 	NameString* TexName = nullptr;
 	NameString* TexGroup = nullptr;
 	int* flags = nullptr;
-	vec3 HitLoc = vec3(0, 0, 0);
-	vec3 HitNorm = vec3(0, 0, 0);
-	vec3 End = vec3(0,0, 0);
-	vec3* Start = nullptr;
-	vec3* m_Extent = nullptr;
+	vec3* HitLoc = nullptr;
+	vec3* HitNorm = nullptr;
+	vec3 End = vec3(0.0f);
+	vec3 Start = vec3(0.0f);
 
 private:
 	CollisionHitList m_CollList;
@@ -282,19 +284,19 @@ private:
 };
 
 // Added in Deus Ex
+// As TraceTextureIterator, except the line passes BSP nodes that do not
+// block visibility. An NPC seeking a spot uses it for its line of sight.
 class TraceVisibleActorsIterator : public Iterator
 {
 public:
-	TraceVisibleActorsIterator(UObject* BaseClass, UObject** OutActor, vec3& HitLoc, vec3& HitNorm, vec3 End, vec3* Start, vec3* Extent);
+	TraceVisibleActorsIterator(UObject* BaseClass, UObject** OutActor, vec3* HitLoc, vec3* HitNorm, const vec3& End, const vec3& Start, const vec3& Extent);
 	bool Next() override;
 
-	UObject* BaseClass = nullptr;
 	UObject** OutActor = nullptr;
-	vec3 HitLoc = vec3(0, 0, 0);
-	vec3 HitNorm = vec3(0, 0, 0);
-	vec3 End = vec3(0,0, 0);
-	vec3* Start = nullptr;
-	vec3* m_Extent = nullptr;
+	vec3* HitLoc = nullptr;
+	vec3* HitNorm = nullptr;
+	vec3 End = vec3(0.0f);
+	vec3 Start = vec3(0.0f);
 
 private:
 	CollisionHitList m_CollList;

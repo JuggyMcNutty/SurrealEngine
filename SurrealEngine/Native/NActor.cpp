@@ -295,19 +295,31 @@ void NActor::GetBoundingBox(UObject* Self, vec3& MinVect, vec3& MaxVect, std::op
 		actor->UpdateBspInfo(); 
 	}  
   
-	BBox bbox = actor->BspInfo.BoundingBox;  
-  
-	if (testLocation || testRotation)  
-	{  
-		vec3 loc = testLocation ? *testLocation : actor->Location();  
-		Rotator rot = testRotation ? *testRotation : actor->Rotation();  
-		mat4 objectToWorld = mat4::translate(loc) * Coords::Rotation(rot).ToMatrix();  
-		bbox = bbox.transform(objectToWorld);  
-	}  
-  
-	MinVect = bbox.min;  
-	MaxVect = bbox.max;  
-	ReturnValue = true;  
+	// With a test place or rotation, as every script call gives, the
+	// original puts the actor there for the moment and takes its
+	// primitive's box; moving the world-space box by them instead left it
+	// off by the actor's own place.
+	if (testLocation || testRotation)
+	{
+		vec3 keepLocation = actor->Location();
+		Rotator keepRotation = actor->Rotation();
+		actor->Location() = testLocation ? *testLocation : keepLocation;
+		actor->Rotation() = testRotation ? *testRotation : keepRotation;
+		actor->UpdateBspInfo();
+		BBox bbox = actor->BspInfo.BoundingBox;
+		actor->Location() = keepLocation;
+		actor->Rotation() = keepRotation;
+		actor->UpdateBspInfo();
+		MinVect = bbox.min;
+		MaxVect = bbox.max;
+		ReturnValue = true;
+		return;
+	}
+
+	BBox bbox = actor->BspInfo.BoundingBox;
+	MinVect = bbox.min;
+	MaxVect = bbox.max;
+	ReturnValue = true;
 }
 
 void NActor::GetCacheEntry(UObject* Self, int Num, std::string& Guid, std::string& Filename, BitfieldBool& ReturnValue)
@@ -641,9 +653,32 @@ void NActor::SetPhysics(UObject* Self, uint8_t newPhysics)
 
 void NActor::SetPhysics_Deus(UObject* Self, uint8_t newPhysics, std::optional<UObject*> newFloor)
 {
-	// To do: do something with that optional new floor
-	// We are calling Self->SetBase() for all other calls to SetPhysics. Do we need to do it here as well?
-	UObject::Cast<UActor>(Self)->SetPhysics(newPhysics);
+	// The original's (engine-dll.md, moving): changing to none, walking,
+	// rolling, rotating or spider, the actor takes the floor it was given
+	// as its base -- through the floor's SupportActor event, which bases
+	// it -- or, with none given, finds its base below; to any other it
+	// leaves its base. None and rotating also stop its velocity and
+	// acceleration. The scripts pass the wall hit as grenades, pool balls,
+	// basketballs and fragments come to rest.
+	UActor* actor = UObject::Cast<UActor>(Self);
+	actor->SetPhysics(newPhysics);
+	if (newPhysics == PHYS_None || newPhysics == PHYS_Rotating)
+	{
+		actor->Velocity() = vec3(0.0f);
+		actor->Acceleration() = vec3(0.0f);
+	}
+	if (newPhysics == PHYS_None || newPhysics == PHYS_Walking || newPhysics == PHYS_Rolling || newPhysics == PHYS_Rotating || newPhysics == PHYS_Spider)
+	{
+		UActor* floor = newFloor ? UObject::TryCast<UActor>(*newFloor) : nullptr;
+		if (floor)
+			CallEvent(floor, "SupportActor", { ExpressionValue::ObjectValue(actor) });
+		else
+			actor->InitBase();
+	}
+	else
+	{
+		actor->SetBase(nullptr, true);
+	}
 }
 
 void NActor::SetRotation(UObject* Self, const Rotator& NewRotation, BitfieldBool& ReturnValue)
@@ -860,7 +895,7 @@ void NActor::TraceTexture(UObject* Self, UObject* BaseClass, UObject*& Actor, Na
 	vec3 realStart = Start ? *Start : SelfActor->Location();
 	vec3 realExtent = Extent ? *Extent : vec3(0, 0, 0);
 
-	Frame::CreatedIterator = std::make_unique<TraceTextureIterator>(BaseClass, &Actor, &texName, &texGroup, &flags, HitLoc, HitNorm, End, &realStart, &realExtent);
+	Frame::CreatedIterator = std::make_unique<TraceTextureIterator>(BaseClass, &Actor, &texName, &texGroup, &flags, &HitLoc, &HitNorm, End, realStart, realExtent);
 }
 
 void NActor::TraceVisibleActors(UObject* Self, UObject* BaseClass, UObject*& Actor, vec3& HitLoc, vec3& HitNorm, const vec3& End, std::optional<vec3> Start, std::optional<vec3> Extent)
@@ -870,7 +905,7 @@ void NActor::TraceVisibleActors(UObject* Self, UObject* BaseClass, UObject*& Act
 	vec3 realStart = Start ? *Start : SelfActor->Location();
 	vec3 realExtent = Extent ? *Extent : vec3(0, 0, 0);
 
-	Frame::CreatedIterator = std::make_unique<TraceVisibleActorsIterator>(BaseClass, &Actor, HitLoc, HitNorm, End, &realStart, &realExtent);
+	Frame::CreatedIterator = std::make_unique<TraceVisibleActorsIterator>(BaseClass, &Actor, &HitLoc, &HitNorm, End, realStart, realExtent);
 }
 
 void NActor::TraceSurfHitInfo_U227(UObject* Self, vec3& Start, vec3& End, vec3* HitLocation, vec3* HitNormal, UObject* HitTex, int* HitFlags, BitfieldBool& ReturnValue)
@@ -895,70 +930,95 @@ void NActor::InStasis(UObject* Self, BitfieldBool& ReturnValue)
 	ReturnValue = SelfActor->InStasis();
 }
 
-void NActor::ParabolicTrace(UObject* Self, vec3& finalLocation, std::optional<vec3> startVelocity, std::optional<vec3> startLocation, std::optional<bool> bCheckActors, std::optional<vec3> Cylinder, std::optional<float> maxTime, std::optional<float> elasticity, std::optional<bool> bBounce, std::optional<float> landingSpeed, std::optional<float> granularity, float& ReturnValue)  
-{  
-	UActor* SelfActor = UObject::Cast<UActor>(Self);  
-	vec3 pos = *startLocation;  
-	vec3 velocity = *startVelocity;  
-	bool bHit = false;  
-	float timeElapsed = 0.0f;  
-	vec3 hitLocation;  
-	vec3 hitNormal;  
-	vec3 previousNormal = vec3(0, 0, 0);  
-	  
-	while(!bHit && timeElapsed < *maxTime)  
-	{  
-		pos += velocity * *granularity;  
-		velocity.z -= SelfActor->Region().Zone->ZoneGravity().z * *granularity;  
-		  
-		if (SelfActor->Trace(hitLocation, hitNormal, pos, *startLocation, *bCheckActors, Cylinder ? *Cylinder : vec3(0, 0, 0)))  
-		{  
-			if (*bBounce && *elasticity > 0.0f)  
-			{  
-				if (dot(previousNormal, hitNormal) > 0.0f)  
-				{  
-					float f = dot(velocity, hitNormal);  
-					velocity = (velocity - f * hitNormal) * (1.0f - *elasticity);  
-					  
-					if (dot(velocity, hitNormal) <= 0.0f)  
-					{  
-						velocity = vec3(0, 0, 0);  
-						bHit = true;  
-					}  
-				}  
-				else  
-				{  
-					vec3 crossProduct = cross(previousNormal, hitNormal);  
-					vec3 edgeNormal = normalize(crossProduct);  
-					float scale = (1.0f - *elasticity) * dot(edgeNormal, velocity);  
-					velocity = edgeNormal * scale;  
-					  
-					if (dot(velocity, previousNormal) < 0.0f)  
-					{  
-						velocity = velocity * -1.0f;  
-					}  
-				}  
-				  
-				pos = hitLocation;   
-				previousNormal = hitNormal; 
-			}  
-			else {  
-				bHit = true;  
-				pos = hitLocation;  
-			}  
-		}  
-  
-		if (length(velocity) < *landingSpeed)  
-		{  
-			bHit = true;  
-		}  
-  
-		timeElapsed += *granularity;  
-	}  
-  
-	finalLocation = pos;  
-	ReturnValue = timeElapsed;  
+void NActor::ParabolicTrace(UObject* Self, vec3& finalLocation, std::optional<vec3> startVelocity, std::optional<vec3> startLocation, std::optional<bool> bCheckActors, std::optional<vec3> Cylinder, std::optional<float> maxTime, std::optional<float> elasticity, std::optional<bool> bBounce, std::optional<float> landingSpeed, std::optional<float> granularity, float& ReturnValue)
+{
+	// The original's (engine-dll.md, traces): a thrown thing's flight in
+	// steps. By default the actor's velocity, location, bCollideActors,
+	// collision cylinder and bBounce, 5 s, an elasticity of 0.9, a landing
+	// speed of 60, and steps of 0.025 s held between 0.005 and 1. Each
+	// step adds the zone's gravity to the velocity and moves by it and the
+	// zone's velocity, the speed held to the zone's terminal velocity. On
+	// a hit it lands if the surface is a floor (normal Z above 0.7) and it
+	// is not bouncing or is slower than the landing speed; else it
+	// bounces: the velocity mirrored about the surface and times the
+	// elasticity, the rest of the step slid along it. It fails -- 0, the
+	// start its final location -- on entering water, leaving the world, a
+	// step longer than about 1,580 units, or running out of time. NPCs use
+	// it for where a falling grenade lands and whether a throw is safe.
+	UActor* SelfActor = UObject::Cast<UActor>(Self);
+	vec3 start = startLocation.value_or(SelfActor->Location());
+	vec3 velocity = startVelocity.value_or(SelfActor->Velocity());
+	bool checkActors = bCheckActors.value_or(SelfActor->bCollideActors());
+	vec3 cylinder = Cylinder.value_or(vec3(SelfActor->CollisionRadius(), SelfActor->CollisionRadius(), SelfActor->CollisionHeight()));
+	float timeLimit = maxTime.value_or(5.0f);
+	float bounciness = elasticity.value_or(0.9f);
+	bool bouncing = bBounce.value_or(SelfActor->bBounce());
+	float landSpeed = landingSpeed.value_or(60.0f);
+	float step = std::clamp(granularity.value_or(0.025f), 0.005f, 1.0f);
+
+	finalLocation = start;
+	ReturnValue = 0.0f;
+
+	vec3 pos = start;
+	float timeElapsed = 0.0f;
+	vec3 hitLocation, hitNormal;
+
+	while (true)
+	{
+		if (timeElapsed >= timeLimit)
+			return; // ran out of time: it fails
+
+		UZoneInfo* zone = UObject::TryCast<UZoneInfo>(engine->LevelInfo->GetLocZone(pos, SelfActor).Zone);
+		if (!zone)
+			return; // left the world
+		if (zone->bWaterZone())
+			return; // entered water
+
+		velocity += zone->ZoneGravity() * step;
+		float terminal = zone->ZoneTerminalVelocity();
+		if (terminal > 0.0f && length(velocity) > terminal)
+			velocity = normalize(velocity) * terminal;
+
+		vec3 delta = (velocity + zone->ZoneVelocity()) * step;
+		if (length(delta) > 1580.0f)
+			return; // a step too long: it fails
+
+		if (SelfActor->Trace(hitLocation, hitNormal, pos + delta, pos, checkActors, cylinder))
+		{
+			if (hitNormal.z > 0.7f && (!bouncing || length(velocity) < landSpeed))
+			{
+				// landed on a floor
+				finalLocation = hitLocation;
+				ReturnValue = timeElapsed + step;
+				return;
+			}
+			// bounce: the velocity mirrored about the surface and times the
+			// elasticity, the rest of the step slid along it
+			velocity = (velocity - 2.0f * dot(velocity, hitNormal) * hitNormal) * bounciness;
+			vec3 remaining = (pos + delta) - hitLocation;
+			vec3 slid = remaining - dot(remaining, hitNormal) * hitNormal;
+			vec3 slidTarget = hitLocation + slid;
+			if (SelfActor->Trace(hitLocation, hitNormal, slidTarget, hitLocation, checkActors, cylinder))
+			{
+				if (hitNormal.z > 0.7f && (!bouncing || length(velocity) < landSpeed))
+				{
+					finalLocation = hitLocation;
+					ReturnValue = timeElapsed + step;
+					return;
+				}
+				velocity = (velocity - 2.0f * dot(velocity, hitNormal) * hitNormal) * bounciness;
+			}
+			pos = hitLocation;
+		}
+		else
+		{
+			pos = pos + delta;
+		}
+
+		timeElapsed += step;
+	}
 }
+
 
 void NActor::RandomBiasedRotation(
 	UObject* Self,
