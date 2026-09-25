@@ -7,6 +7,43 @@
 #include "Engine.h"
 #include "Utils/Logger.h"
 
+// The 30 tag names, in the order of EDeusExTextTags; a tag is the first one
+// its content starts with, case sensitive, so <LOG ERROR> is an L. Content
+// that starts with none of them has no tag (TT_None).
+static const char* const DeusExTextTagNames[] =
+{
+	"TEXT", "FILE", "EMAIL", "NOTE", "/NOTE", "GOAL", "/GOAL", "COMMENT",
+	"/COMMENT", "PLAYERNAME", "PLAYERFIRSTNAME", "NP", "JC", "JL", "JR",
+	"DC", "C", "/C", "P", "B", "/B", "U", "/U", "I", "/I", "G", "F", "L",
+	"/<", "/>"
+};
+
+// A tag's fields: the text after its '=', split at commas and trimmed of
+// spaces. No '=' means no fields, and a missing field is empty.
+static Array<std::string> ParseFields(const std::string& content)
+{
+	Array<std::string> fields;
+	if (content.empty() || content[0] != '=')
+		return fields;
+
+	size_t pos = 1;
+	while (true)
+	{
+		size_t comma = content.find(',', pos);
+		std::string field = content.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+		size_t begin = field.find_first_not_of(' ');
+		if (begin == std::string::npos)
+			field.clear();
+		else
+			field = field.substr(begin, field.find_last_not_of(' ') - begin + 1);
+		fields.push_back(std::move(field));
+		if (comma == std::string::npos)
+			break;
+		pos = comma + 1;
+	}
+	return fields;
+}
+
 bool UDXTextParser::OpenText(NameString textName, std::string textPackage)
 {
 	CloseText();
@@ -16,6 +53,9 @@ bool UDXTextParser::OpenText(NameString textName, std::string textPackage)
 		textPackage = "DeusExText";
 	textObject = UObject::Cast<UDXExtString>(engine->packages->GetPackage(textPackage)->GetUObject("ExtString", textName));
 	Text() = textObject ? 1 : 0;
+	// The original starts a text with no paragraph yet; the last tag, name,
+	// colour, file and email stay from before.
+	bParagraphStarted() = false;
 	return textObject;
 }
 
@@ -29,279 +69,190 @@ void UDXTextParser::CloseText()
 
 bool UDXTextParser::ProcessText()
 {
-	/*
-		Tokenizer function reading pseudo HTML text ala this:
-
-		<DC=255,255,255>
-		<P>We'll make this one easy for you.  To open the door, use the code:
-		<P>
-		<P><JC><B>0012</B>
-		<P>
-		<P>Got it?
-		<P>
-		<P>Jaime
-	*/
-
+	// One token, as the original's ParseTextBlock: a tag, or the text up to
+	// the next tag with each CR and LF made a space and nothing trimmed, so
+	// a line break alone between two tags is a token of two spaces. The
+	// text's first <P> is swallowed and text before it dropped; false once
+	// the text is used up, on the call after the last token.
 	if (!textObject)
 		return false;
 
 	const std::string& text = textObject->Text();
-	size_t pos = (size_t)TextPos();
 	size_t len = text.size();
+	size_t pos = (size_t)TextPos();
 
-	// Eat whitespace
-	EatWhitespace(text, pos);
-
-	if (pos >= len) // EOF
+	while (pos < len)
 	{
-		TextPos() = (int)pos;
-		return false;
-	}
-
-	size_t tagstart = pos;
-	if (!ReadChars(text, pos, "<"))
-	{
-		if (ReadText(text, pos, LastText()))
+		if (text[pos] == '<')
 		{
-			LastTag() = DeusExTextTags::TT_Text;
+			DeusExTextTags tag = ParseTag(text, pos);
+			if (tag == DeusExTextTags::TT_NewParagraph && !bParagraphStarted())
+			{
+				bParagraphStarted() = true;
+				continue;
+			}
+			LastTag() = tag;
 			TextPos() = (int)pos;
 			return true;
 		}
-	}
-	else
-	{
-		std::string tagname;
-		if (ReadTagName(text, pos, tagname))
+
+		std::string value;
+		while (pos < len && text[pos] != '<')
 		{
-			if (tagname == "DC" && ReadTagColor(text, pos, DefaultColor()) && ReadChars(text, pos, ">"))
-			{
-				LastColor() = DefaultColor();
-				LastTag() = DeusExTextTags::TT_DefaultColor;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "P" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_NewParagraph;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "B" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_Bold;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "/B" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_EndBold;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "I" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_Italics;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "/I" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_EndItalics;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "U" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_Underline;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "/U" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_EndUnderline;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "JC" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_None; // What does <JC> mean? Seems to be used for headlines
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "JR" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_None; // What does <JR> mean? Seems to be used for signatures
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "PLAYERNAME" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_PlayerName;
-				LastText() = PlayerName();
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "PLAYERFIRSTNAME" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_PlayerFirstName;
-				LastText() = PlayerFirstName();
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "COMMENT" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_Comment;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "/COMMENT" && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_EndComment;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "FILE" && ReadTagFile(text, pos, LastFileName(), LastFileDescription()) && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_File;
-				TextPos() = (int)pos;
-				return true;
-			}
-			else if (tagname == "EMAIL" && ReadTagEmail(text, pos, LastEmailName(), LastEmailSubject(), LastEmailFrom(), LastEmailTo(), LastEmailCC()) && ReadChars(text, pos, ">"))
-			{
-				LastTag() = DeusExTextTags::TT_File;
-				TextPos() = (int)pos;
-				return true;
-			}
+			char c = text[pos++];
+			value += (c == '\r' || c == '\n') ? ' ' : c;
+		}
+		if (!bParagraphStarted())
+			continue;
+		LastTag() = DeusExTextTags::TT_Text;
+		LastText() = std::move(value);
+		TextPos() = (int)pos;
+		return true;
+	}
+
+	TextPos() = (int)pos;
+	return false;
+}
+
+DeusExTextTags UDXTextParser::ParseTag(const std::string& text, size_t& pos)
+{
+	// A tag runs from '<' to the first '>' (the original's ParseTag), and
+	// its effects are the original's ParseToken.
+	size_t start = pos + 1;
+	size_t close = text.find('>', start);
+	std::string content = close == std::string::npos ? text.substr(start) : text.substr(start, close - start);
+	pos = close == std::string::npos ? text.size() : close + 1;
+
+	DeusExTextTags tag = DeusExTextTags::TT_None;
+	std::string fields;
+	for (int i = 0; i < 30; i++)
+	{
+		size_t nameLen = strlen(DeusExTextTagNames[i]);
+		if (content.compare(0, nameLen, DeusExTextTagNames[i]) == 0)
+		{
+			tag = (DeusExTextTags)i;
+			fields = content.substr(nameLen);
+			break;
 		}
 	}
 
-	// Parse error. Dump what we got as text for debugging
-	LastTag() = DeusExTextTags::TT_Text;
-	LastText() = text.substr(tagstart);
-	TextPos() = (int)len;
-	return true;
-}
-
-void UDXTextParser::EatWhitespace(const std::string& text, size_t& pos)
-{
-	size_t len = text.size();
-	while (pos < len && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\r' || text[pos] == '\n'))
-		pos++;
-}
-
-bool UDXTextParser::ReadTagName(const std::string& text, size_t& pos, std::string& tagname)
-{
-	tagname.clear();
-
-	size_t len = text.size();
-	while (pos < len && ((text[pos] >= 'a' && text[pos] <= 'z') || (text[pos] >= 'A' && text[pos] <= 'Z') || text[pos] == '/'))
+	switch (tag)
 	{
-		tagname += text[pos];
+	case DeusExTextTags::TT_File:
+		ParseFile(fields);
+		break;
+	case DeusExTextTags::TT_Email:
+		ParseEmail(fields);
+		break;
+	case DeusExTextTags::TT_Note:
+		return FindEndTag(text, pos, DeusExTextTags::TT_EndNote);
+	case DeusExTextTags::TT_Goal:
+		return FindEndTag(text, pos, DeusExTextTags::TT_EndGoal);
+	case DeusExTextTags::TT_Comment:
+		return FindEndTag(text, pos, DeusExTextTags::TT_EndComment);
+	case DeusExTextTags::TT_PlayerName:
+		LastText() = PlayerName();
+		break;
+	case DeusExTextTags::TT_PlayerFirstName:
+		LastText() = PlayerFirstName();
+		break;
+	case DeusExTextTags::TT_DefaultColor:
+		DefaultColor() = ParseColor(fields);
+		LastColor() = DefaultColor();
+		break;
+	case DeusExTextTags::TT_TextColor:
+		LastColor() = ParseColor(fields);
+		break;
+	case DeusExTextTags::TT_Graphic:
+	case DeusExTextTags::TT_Font:
+		if (!fields.empty() && fields[0] == '=')
+			LastName() = NameString(fields.substr(1));
+		break;
+	case DeusExTextTags::TT_OpenBracket:
+		LastText() = "<";
+		break;
+	case DeusExTextTags::TT_CloseBracket:
+		LastText() = ">";
+		break;
+	default:
+		break;
+	}
+	return tag;
+}
+
+DeusExTextTags UDXTextParser::FindEndTag(const std::string& text, size_t& pos, DeusExTextTags endTag)
+{
+	// The original's FindEndTag: NOTE, GOAL and COMMENT hide what they hold
+	// and the token's tag is the end tag's. The tags inside are read and the
+	// character after each is skipped, so an end tag straight after another
+	// tag is missed. With no end tag the rest of the text is hidden -- the
+	// original reads on past the text's end there; this stops at it.
+	size_t len = text.size();
+	while (pos < len)
+	{
+		if (text[pos] != '<')
+		{
+			pos++;
+			continue;
+		}
+
+		size_t start = pos + 1;
+		size_t close = text.find('>', start);
+		std::string content = close == std::string::npos ? text.substr(start) : text.substr(start, close - start);
+		pos = close == std::string::npos ? len : close + 1;
+
+		DeusExTextTags tag = DeusExTextTags::TT_None;
+		for (int i = 0; i < 30; i++)
+		{
+			if (content.compare(0, strlen(DeusExTextTagNames[i]), DeusExTextTagNames[i]) == 0)
+			{
+				tag = (DeusExTextTags)i;
+				break;
+			}
+		}
+		if (tag == endTag)
+			return endTag;
 		pos++;
 	}
-
-	if (tagname.empty() || pos == len)
-		return false;
-	return true;
+	return endTag;
 }
 
-bool UDXTextParser::ReadChars(const std::string& text, size_t& pos, const std::string& chars)
+void UDXTextParser::ParseFile(const std::string& fields)
 {
-	if (pos + chars.size() >= text.size() || text.substr(pos, chars.size()) != chars)
-		return false;
-	pos += chars.size();
-	return true;
+	// FILE=name,description; the last ones read stay, whatever the token.
+	Array<std::string> f = ParseFields(fields);
+	LastFileName() = f.size() > 0 ? f[0] : "";
+	LastFileDescription() = f.size() > 1 ? f[1] : "";
 }
 
-bool UDXTextParser::ReadTagColor(const std::string& text, size_t& pos, Color& color)
+void UDXTextParser::ParseEmail(const std::string& fields)
 {
-	if (!ReadChars(text, pos, "="))
-		return false;
-	if (!ReadInteger(text, pos, color.R))
-		return false;
-	if (!ReadChars(text, pos, ","))
-		return false;
-	if (!ReadInteger(text, pos, color.G))
-		return false;
-	if (!ReadChars(text, pos, ","))
-		return false;
-	if (!ReadInteger(text, pos, color.B))
-		return false;
+	// EMAIL=name,subject,from,to,cc; the last ones read stay, whatever the
+	// token.
+	Array<std::string> f = ParseFields(fields);
+	LastEmailName() = f.size() > 0 ? f[0] : "";
+	LastEmailSubject() = f.size() > 1 ? f[1] : "";
+	LastEmailFrom() = f.size() > 2 ? f[2] : "";
+	LastEmailTo() = f.size() > 3 ? f[3] : "";
+	LastEmailCC() = f.size() > 4 ? f[4] : "";
+}
+
+Color UDXTextParser::ParseColor(const std::string& fields)
+{
+	// The three numbers after '=', or black without one. The original's
+	// alpha is whatever byte was left there; ours is opaque.
+	Array<std::string> f = ParseFields(fields);
+	Color color;
+	color.R = f.size() > 0 ? (uint8_t)std::atoi(f[0].c_str()) : 0;
+	color.G = f.size() > 1 ? (uint8_t)std::atoi(f[1].c_str()) : 0;
+	color.B = f.size() > 2 ? (uint8_t)std::atoi(f[2].c_str()) : 0;
 	color.A = 255;
-	return true;
-}
-
-bool UDXTextParser::ReadInteger(const std::string& text, size_t& pos, int value)
-{
-	std::string v;
-	size_t len = text.size();
-	while (pos < len && text[pos] >= '0' && text[pos] <= '9')
-	{
-		v += text[pos];
-		pos++;
-	}
-	if (v.empty())
-		return false;
-	value = std::atoi(v.c_str());
-	return true;
-}
-
-bool UDXTextParser::ReadTextUntil(const std::string& text, size_t& pos, std::string& value, char endChar)
-{
-	value.clear();
-	size_t len = text.size();
-	while (pos < len && text[pos] != endChar)
-	{
-		value += text[pos];
-		pos++;
-	}
-	return pos != len;
-}
-
-bool UDXTextParser::ReadTagFile(const std::string& text, size_t& pos, std::string& filename, std::string& filedescription)
-{
-	if (!ReadTextUntil(text, pos, filename, ',') || !ReadChars(text, pos, ","))
-		return false;
-	return ReadTextUntil(text, pos, filedescription, '>');
-}
-
-bool UDXTextParser::ReadTagEmail(const std::string& text, size_t& pos, std::string& emailName, std::string& emailSubject, std::string& emailFrom, std::string& emailTo, std::string& emailCC)
-{
-	if (!ReadTextUntil(text, pos, emailName, ',') || !ReadChars(text, pos, ","))
-		return false;
-	if (!ReadTextUntil(text, pos, emailSubject, ',') || !ReadChars(text, pos, ","))
-		return false;
-	if (!ReadTextUntil(text, pos, emailFrom, ',') || !ReadChars(text, pos, ","))
-		return false;
-	if (!ReadTextUntil(text, pos, emailTo, ',') || !ReadChars(text, pos, ","))
-		return false;
-	return ReadTextUntil(text, pos, emailCC, '>');
-}
-
-bool UDXTextParser::ReadText(const std::string& text, size_t& pos, std::string& value)
-{
-	EatWhitespace(text, pos);
-
-	value.clear();
-	size_t len = text.size();
-	while (pos < len && text[pos] != '<')
-	{
-		value += text[pos];
-		pos++;
-	}
-
-	// Eat any whitespace at the end
-	while (!value.empty() && (value.back() == ' ' || value.back() == '\r' || value.back() == '\n'))
-		value.pop_back();
-
-	if (value.empty() || pos == len)
-		return false;
-	return true;
+	return color;
 }
 
 bool UDXTextParser::IsEOF()
 {
-	return !textObject || TextPos() == textObject->Text().size();
+	return !textObject || (size_t)TextPos() >= textObject->Text().size();
 }
 
 std::string UDXTextParser::GetText()
@@ -311,7 +262,7 @@ std::string UDXTextParser::GetText()
 
 void UDXTextParser::GotoLabel(const std::string& label)
 {
-	LogUnimplemented("DeusExTextParser.GotoLabel()");
+	// The original's does nothing.
 }
 
 uint8_t UDXTextParser::GetTag()
@@ -321,70 +272,43 @@ uint8_t UDXTextParser::GetTag()
 
 NameString UDXTextParser::GetName()
 {
-	if (LastTag() == DeusExTextTags::TT_Font)
-		return {};
 	return LastName();
 }
 
 Color UDXTextParser::GetColor()
 {
-	if (LastTag() < DeusExTextTags::TT_DefaultColor)
+	// After /C, the colour the parser was made with: black, as nothing
+	// sets it.
+	if (LastTag() == DeusExTextTags::TT_RevertColor)
 	{
-		Color color;
-		color.A = 255;
-		color.R = 255;
-		color.G = 127;
-		color.B = 127;
-		return color;
+		Color black;
+		black.R = 0;
+		black.G = 0;
+		black.B = 0;
+		black.A = 255;
+		return black;
 	}
-	else if (LastTag() == DeusExTextTags::TT_RevertColor)
-	{
-		return DefaultColor();
-	}
-	else if (LastTag() > DeusExTextTags::TT_TextColor)
-	{
-		Color color;
-		color.A = 255;
-		color.R = 127;
-		color.G = 127;
-		color.B = 255;
-		return color;
-	}
-	else
-	{
-		return LastColor();
-	}
+	return LastColor();
 }
 
 void UDXTextParser::GetEmailInfo(std::string& name, std::string& subject, std::string& from, std::string& to, std::string& cc)
 {
-	name = "";
-	subject = "";
-	from = "";
-	to = "";
-	cc = "";
-	if (LastTag() == DeusExTextTags::TT_Email)
-	{
-		name = LastEmailName();
-		subject = LastEmailSubject();
-		from = LastEmailFrom();
-		to = LastEmailTo();
-		cc = LastEmailCC();
-	}
+	// The last ones read, whatever the token, as the original's.
+	name = LastEmailName();
+	subject = LastEmailSubject();
+	from = LastEmailFrom();
+	to = LastEmailTo();
+	cc = LastEmailCC();
 }
 
 void UDXTextParser::GetFileInfo(std::string& fileName, std::string& fileDescription)
 {
-	fileName = "";
-	fileDescription = "";
-	if (LastTag() == DeusExTextTags::TT_File)
-	{
-		fileName = LastFileName();
-		fileDescription = LastFileDescription();
-	}
+	fileName = LastFileName();
+	fileDescription = LastFileDescription();
 }
 
 void UDXTextParser::SetPlayerName(const std::string& newPlayerName)
 {
 	PlayerName() = newPlayerName;
+	PlayerFirstName() = newPlayerName.substr(0, newPlayerName.find(' '));
 }
