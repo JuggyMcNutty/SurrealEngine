@@ -15,13 +15,13 @@ void UDeusExPlayer::ConBindEvents()
 UObject* UDeusExPlayer::CreateDataVaultImageNoteObject()
 {
 	auto cls = engine->packages->FindClass("DeusEx.DataVaultImageNote");
-	return engine->packages->GetTransientPackage()->NewObject("DataVaultImageNote", cls, ObjectFlags::Transient);
+	return engine->LevelPackage->NewObject("DataVaultImageNote", cls, ObjectFlags::NoFlags);
 }
 
 UObject* UDeusExPlayer::CreateDumpLocationObject()
 {
 	auto cls = engine->packages->FindClass("DeusEx.DumpLocation");
-	return engine->packages->GetTransientPackage()->NewObject("DumpLocation", cls, ObjectFlags::Transient);
+	return engine->LevelPackage->NewObject("DumpLocation", cls, ObjectFlags::NoFlags);
 }
 
 UObject* UDeusExPlayer::CreateGameDirectoryObject()
@@ -38,19 +38,19 @@ UObject* UDeusExPlayer::CreateGameDirectoryObject()
 UObject* UDeusExPlayer::CreateHistoryEvent()
 {
 	auto cls = engine->packages->FindClass("ConSys.ConHistoryEvent");
-	return engine->packages->GetTransientPackage()->NewObject("ConHistoryEvent", cls, ObjectFlags::Transient);
+	return engine->LevelPackage->NewObject("ConHistoryEvent", cls, ObjectFlags::NoFlags);
 }
 
 UObject* UDeusExPlayer::CreateHistoryObject()
 {
 	auto cls = engine->packages->FindClass("ConSys.ConHistory");
-	return Cast<UConHistory>(engine->packages->GetTransientPackage()->NewObject("ConHistory", cls, ObjectFlags::Transient));
+	return Cast<UConHistory>(engine->LevelPackage->NewObject("ConHistory", cls, ObjectFlags::NoFlags));
 }
 
 UObject* UDeusExPlayer::CreateLogObject()
 {
 	auto cls = engine->packages->FindClass("DeusEx.DeusExLog");
-	return engine->packages->GetTransientPackage()->NewObject("DeusExLog", cls, ObjectFlags::Transient);
+	return engine->LevelPackage->NewObject("DeusExLog", cls, ObjectFlags::NoFlags);
 }
 
 void UDeusExPlayer::DeleteSaveGameFiles(std::optional<std::string> saveDirectory)
