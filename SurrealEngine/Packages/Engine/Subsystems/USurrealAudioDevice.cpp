@@ -185,7 +185,10 @@ void USurrealAudioDevice::Update(const mat4& listener)
 	UpdateMusic();
 
 	m_Device->SetMusicVolume(MusicVolume / 255.0f);
-	m_Device->SetSoundVolume(SoundVolume / 255.0f * 0.5f);
+	// Deus Ex: the slider is the whole scale, as Galaxy's (its speech kept the same
+	// level: the talk slot's old x2 and this halving cancelled). Other games keep
+	// the halving their normalized volumes were tuned against.
+	m_Device->SetSoundVolume(SoundVolume / 255.0f * (engine->LaunchInfo.IsDeusEx() ? 1.0f : 0.5f));
 	m_Device->Update();
 }
 
@@ -383,12 +386,7 @@ bool USurrealAudioDevice::PlaySound(UActor* Actor, int Id, USound* Sound, vec3 L
 	if (Radius <= 0.0) // Seems we have zero radius values. Lovely.
 		Radius = 1500.0f;
 
-	if (isTalk && engine->LaunchInfo.IsDeusEx())
-	{
-		// Should this still be directional?
-		Volume *= 2.0f;
-	}
-	else
+	if (!engine->LaunchInfo.IsDeusEx())
 	{
 		// Attempt to normalize volume around 1.0 as the values used by the original games are just really broken in general.
 		if (Volume >= 8.0f)
@@ -396,6 +394,8 @@ bool USurrealAudioDevice::PlaySound(UActor* Actor, int Id, USound* Sound, vec3 L
 		else
 			Volume = (Volume - 1.0f) * 0.25f + 1.0f;
 	}
+	// Deus Ex plays the script's volume as Galaxy does: scaled only by fall-off,
+	// obstruction and the sliders, and capped at full by the device (AL_MAX_GAIN).
 
 	if (!m_Viewport || !Sound)
 		return false;

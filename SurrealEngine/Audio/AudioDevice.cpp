@@ -19,6 +19,14 @@
 
 #define UU_PER_METER 43
 
+// Deus Ex takes Galaxy's distance shape (galaxy-dll.md, Each frame): gain
+// 1 - d/r from the sound to its radius, silent there, the product capped at
+// full. Other games keep the fork's tuning (rolloff 1.1, full within 0.1 r).
+static bool UseGalaxyFalloff()
+{
+	return engine && engine->LaunchInfo.IsDeusEx();
+}
+
 class ALSoundSource
 {
 public:
@@ -28,7 +36,7 @@ public:
 		if (alGetError() != AL_NO_ERROR)
 			Exception::Throw("Failed to generate AL source");
 
-		alSourcef(id, AL_ROLLOFF_FACTOR, 1.1f);
+		alSourcef(id, AL_ROLLOFF_FACTOR, UseGalaxyFalloff() ? 1.0f : 1.1f);
 	}
 
 	~ALSoundSource()
@@ -88,7 +96,7 @@ public:
 		{
 			radius = newRadius;
 			alSourcef(id, AL_MAX_DISTANCE, radius);
-			alSourcef(id, AL_REFERENCE_DISTANCE, 0.1f * radius);
+			alSourcef(id, AL_REFERENCE_DISTANCE, UseGalaxyFalloff() ? 0.0f : 0.1f * radius);
 		}
 	}
 
@@ -130,14 +138,17 @@ public:
 		if (volume != newVolume)
 		{
 			volume = newVolume;
-			alSourcef(id, AL_GAIN, volume * globalVolume);
-			alSourcef(id, AL_MAX_GAIN, volume * globalVolume);
+			ApplyGain();
 		}
 	}
 
 	void SetGlobalVolume(float newGlobalVolume)
 	{
-		globalVolume = newGlobalVolume;
+		if (globalVolume != newGlobalVolume)
+		{
+			globalVolume = newGlobalVolume;
+			ApplyGain();
+		}
 	}
 
 	void SetPitch(float newPitch)
@@ -163,6 +174,14 @@ public:
 	ALuint id = -1;
 
 private:
+	void ApplyGain()
+	{
+		alSourcef(id, AL_GAIN, volume * globalVolume);
+		// Galaxy caps a voice at full: the slider is the ceiling however loud the
+		// script's volume, so the cap bites after AL's distance attenuation too.
+		alSourcef(id, AL_MAX_GAIN, UseGalaxyFalloff() ? globalVolume : volume * globalVolume);
+	}
+
 	UActor* actor = nullptr;
 	USound* sound = nullptr;
 	vec3 position = vec3(0.0f);
