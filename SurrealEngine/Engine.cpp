@@ -276,8 +276,12 @@ void Engine::Run()
 				else if (LevelInfo->bNextItems())
 				{
 					ClientTravelInfo.TravelType = ETravelType::TRAVEL_Relative;
+					// Captured before the pre-travel prune deletes what
+					// crosses in the pawn's graph, as the original's travel
+					// save runs before its Browse.
+					auto travelInfo = CreateTravelInfo(true);
 					DeusExPreTravel(UnrealURL(LevelInfo->URL, LevelInfo->NextURL()));
-					LoadMap(UnrealURL(LevelInfo->URL, LevelInfo->NextURL()), CreateTravelInfo(true));
+					LoadMap(UnrealURL(LevelInfo->URL, LevelInfo->NextURL()), travelInfo);
 					LoginPlayer();
 				}
 				else
@@ -312,8 +316,11 @@ void Engine::Run()
 
 			UnrealURL url(ClientTravelInfo.URL);
 			LogMessage("Client travel to " + url.ToString());
+			// Captured before the pre-travel prune deletes what crosses in
+			// the pawn's graph.
+			auto travelInfo = CreateTravelInfo(ClientTravelInfo.TransferItems);
 			DeusExPreTravel(url);
-			LoadMap(url, CreateTravelInfo(ClientTravelInfo.TransferItems));
+			LoadMap(url, travelInfo);
 			LoginPlayer();
 		}
 	}
@@ -928,12 +935,12 @@ void Engine::PossessSavedPlayer()
 
 	if (auto pawnExt = UObject::TryCast<UPlayerPawnExt>(pawn))
 	{
-		// FlagBase is Transient (not saved), so it needs the same reconstruction LoginPlayer
-		// does for a fresh spawn.
+		// A saved pawn brings its own flag base back with the level; only a
+		// save from before the base lived in the level lacks one.
 		if (!pawnExt->FlagBase())
 		{
 			auto flagBaseCls = packages->FindClass("Extension.FlagBase");
-			pawnExt->FlagBase() = UObject::Cast<UFlagBase>(packages->GetTransientPackage()->NewObject("FlagBase", flagBaseCls, ObjectFlags::Transient));
+			pawnExt->FlagBase() = UObject::Cast<UFlagBase>(LevelPackage->NewObject("FlagBase", flagBaseCls, ObjectFlags::NoFlags));
 		}
 	}
 
@@ -1149,6 +1156,16 @@ void Engine::PruneTravelActors() const
 			actor->IsA("Skill") || actor->IsA("SkillManager")))
 			actor->Destroy();
 	}
+	// The flag base goes too, after DeleteAllFlags, as the original's: the
+	// flags cross in the pawn's travel graph, captured before this prune.
+	if (auto pawnExt = UObject::TryCast<UPlayerPawnExt>(viewport->Actor()))
+	{
+		if (UFlagBase* flagBase = pawnExt->FlagBase())
+		{
+			flagBase->DeleteAllFlags();
+			pawnExt->FlagBase() = nullptr;
+		}
+	}
 }
 
 // The level package into a save directory: -2 Current, -1 the quick save,
@@ -1219,11 +1236,12 @@ void Engine::LoginPlayer()
 
 	if (auto pawnExt = UObject::TryCast<UPlayerPawnExt>(pawn))
 	{
-		// Unclear if this is how DeusEx spawned this object
+		// In the level package, so a save keeps the base and its flags. A
+		// travelled or loaded pawn brings its own.
 		if (!pawnExt->FlagBase())
 		{
 			auto flagBaseCls = packages->FindClass("Extension.FlagBase");
-			pawnExt->FlagBase() = UObject::Cast<UFlagBase>(packages->GetTransientPackage()->NewObject("FlagBase", flagBaseCls, ObjectFlags::Transient));
+			pawnExt->FlagBase() = UObject::Cast<UFlagBase>(LevelPackage->NewObject("FlagBase", flagBaseCls, ObjectFlags::NoFlags));
 		}
 	}
 

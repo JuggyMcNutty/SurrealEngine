@@ -26,13 +26,11 @@ UObject* UDeusExPlayer::CreateDumpLocationObject()
 
 UObject* UDeusExPlayer::CreateGameDirectoryObject()
 {
-	if (!m_GameDirectory)
-	{
-		auto cls = engine->packages->FindClass("DeusEx.GameDirectory");
-		m_GameDirectory = Cast<UDXGameDirectory>(engine->packages->GetTransientPackage()->NewObject("GameDirectory", cls, ObjectFlags::Transient));
-	}
-
-	return m_GameDirectory;
+	// A new one each call, in the transient package, both as the original's;
+	// the scripts CriticalDelete it after use, which the fork's garbage
+	// collector honours later.
+	auto cls = engine->packages->FindClass("DeusEx.GameDirectory");
+	return Cast<UDXGameDirectory>(engine->packages->GetTransientPackage()->NewObject("GameDirectory", cls, ObjectFlags::Transient));
 }
 
 UObject* UDeusExPlayer::CreateHistoryEvent()

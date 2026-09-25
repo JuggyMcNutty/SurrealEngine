@@ -266,7 +266,9 @@ T* UFlagBase::GetOrCreateFlag(const NameString& FlagName, std::optional<bool> bA
 
 		const uint32_t crc = FlagNameCrc(FlagName);
 		const int bucket = (int)(crc % HashTableSize);
-		auto flag = UObject::Cast<T>(engine->packages->GetTransientPackage()->NewObject(FlagName, cls, ObjectFlags::Transient));
+		// In the flag base's own package -- the level's -- so a save keeps
+		// the flags, as the original's does.
+		auto flag = UObject::Cast<T>(package->NewObject(FlagName, cls, ObjectFlags::NoFlags));
 		flag->FlagName() = FlagName;
 		flag->FlagBase() = this;
 		flag->flagType() = (uint8_t)flagType; // the class defaults leave it 0, Bool

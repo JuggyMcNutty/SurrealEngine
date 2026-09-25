@@ -34,12 +34,16 @@ std::string ActorTravelInfo::Create(UPlayerPawn* pawn, bool transferItems)
 			{
 				if (auto objProperty = UObject::TryCast<UObjectProperty>(property))
 				{
-					UObject* value = *static_cast<UObject**>(cur->GetProperty(objProperty));
-					if (value && travelObjectNames.find(value) == travelObjectNames.end())
+					void* data = cur->GetProperty(objProperty);
+					for (size_t dim = 0; dim < objProperty->ArrayDimension; dim++)
 					{
-						std::string name = "item" + std::to_string(processList.size());
-						travelObjectNames[value] = name;
-						processList.push_back(value);
+						UObject* value = *static_cast<UObject**>(objProperty->GetElement(data, dim));
+						if (value && travelObjectNames.find(value) == travelObjectNames.end())
+						{
+							std::string name = "item" + std::to_string(processList.size());
+							travelObjectNames[value] = name;
+							processList.push_back(value);
+						}
 					}
 				}
 			}
@@ -87,24 +91,33 @@ ActorTravelInfo::TravelObject ActorTravelInfo::CreateObject(UObject* travelObjec
 	{
 		if (auto objProperty = UObject::TryCast<UObjectProperty>(property))
 		{
-			UObject* value = *static_cast<UObject**>(travelObject->GetProperty(objProperty));
-			std::string name;
-			if (value)
+			void* data = travelObject->GetProperty(objProperty);
+			for (size_t dim = 0; dim < objProperty->ArrayDimension; dim++)
 			{
-				auto it = travelObjects.find(value);
-				if (it != travelObjects.end())
-					name = it->second;
+				UObject* value = *static_cast<UObject**>(objProperty->GetElement(data, dim));
+				std::string name;
+				if (value)
+				{
+					auto it = travelObjects.find(value);
+					if (it != travelObjects.end())
+						name = it->second;
+				}
+				else
+				{
+					// Seems we are not supposed to travel object properties set to None?
+					//
+					// For Deus Ex, AugmentationSystem can be set to none and then is reinitialized in PostBeginPlay.
+					// Travel happens after PostBeginPlay, so if we set it back to None Deus Ex breaks.
+					// name = "None";
+				}
+				if (!name.empty())
+				{
+					std::string key = property->Name.ToString();
+					if (objProperty->ArrayDimension > 1)
+						key += "[" + std::to_string(dim) + "]";
+					info.Properties[key] = name;
+				}
 			}
-			else
-			{
-				// Seems we are not supposed to travel object properties set to None?
-				// 
-				// For Deus Ex, AugmentationSystem can be set to none and then is reinitialized in PostBeginPlay.
-				// Travel happens after PostBeginPlay, so if we set it back to None Deus Ex breaks.
-				// name = "None";
-			}
-			if (!name.empty())
-				info.Properties[property->Name.ToString()] = name;
 		}
 		else
 		{
@@ -144,7 +157,9 @@ Array<UObject*> ActorTravelInfo::Accept(UPlayerPawn* pawn, const std::string& tr
 			}
 			else if (cls)
 			{
-				object = engine->packages->GetTransientPackage()->NewObject({}, cls, ObjectFlags::Transient);
+				// In the level package, so a save keeps what travelled: the
+				// flag base and its flags, the key list, the history.
+				object = engine->LevelPackage->NewObject({}, cls, ObjectFlags::NoFlags);
 			}
 			else
 			{
@@ -184,34 +199,44 @@ Array<UObject*> ActorTravelInfo::Accept(UPlayerPawn* pawn, const std::string& tr
 			if (property->Name == "Inventory" && !AllFlags(property->PropFlags, PropertyFlags::Travel))
 				continue;
 
-			auto it = objInfo.Properties.find(property->Name.ToString());
-			if (it == objInfo.Properties.end())
-				continue;
-			const std::string& value = it->second;
-
 			if (auto objProperty = UObject::TryCast<UObjectProperty>(property))
 			{
-				auto obj = static_cast<UObject**>(acceptedObject->GetProperty(objProperty));
-				if (value != "None")
+				void* data = acceptedObject->GetProperty(objProperty);
+				for (size_t dim = 0; dim < objProperty->ArrayDimension; dim++)
 				{
-					auto it = nameToObject.find(value);
-					if (it != nameToObject.end())
+					std::string key = property->Name.ToString();
+					if (objProperty->ArrayDimension > 1)
+						key += "[" + std::to_string(dim) + "]";
+					auto vit = objInfo.Properties.find(key);
+					if (vit == objInfo.Properties.end())
+						continue;
+					const std::string& value = vit->second;
+
+					auto obj = static_cast<UObject**>(objProperty->GetElement(data, dim));
+					if (value != "None")
 					{
-						*obj = nameToObject[value];
+						auto nit = nameToObject.find(value);
+						if (nit != nameToObject.end())
+						{
+							*obj = nit->second;
+						}
+						else
+						{
+							LogMessage("Warning: could not find travel object: " + value);
+						}
 					}
 					else
 					{
-						LogMessage("Warning: could not find travel object: " + value);
+						*obj = nullptr;
 					}
-				}
-				else
-				{
-					*obj = nullptr;
 				}
 			}
 			else
 			{
-				acceptedObject->SetPropertyFromString(property->Name, value);
+				auto it = objInfo.Properties.find(property->Name.ToString());
+				if (it == objInfo.Properties.end())
+					continue;
+				acceptedObject->SetPropertyFromString(property->Name, it->second);
 			}
 		}
 	}

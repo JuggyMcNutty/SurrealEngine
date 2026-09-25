@@ -223,5 +223,4 @@ public:
 	uint8_t& translucencyLevel() { return Value<uint8_t>(PropOffsets_DeusExPlayer.translucencyLevel); }
 
 private:
-	UDXGameDirectory* m_GameDirectory = nullptr;
 };
