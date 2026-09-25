@@ -291,6 +291,15 @@ void LightSystem::InitVertexLight(VertexLight& out, UActor* actor, UZoneInfo* zo
 	// AmbientGlow value 255 is a special pulsating effect used for powerups
 	float ambientGlow = actor->AmbientGlow() == 255 ? AmbientGlowAmount : actor->AmbientGlow() * (1.0f / 255.0f);
 	out.AmbientColor = ambientGlow + hsbtorgb(zoneActor->AmbientHue(), zoneActor->AmbientSaturation(), zoneActor->AmbientBrightness());
+
+	if (engine->LaunchInfo.IsDeusEx())
+	{
+		out.OriginalFormula = true;
+		out.ScaleGlow = actor->ScaleGlow();
+		SetupForActorDX(out, actor);
+	}
+	else
+	{
 	out.ScaleGlow = actor->ScaleGlow() * 1.5f;
 
 	int lightIndex = 0;
@@ -305,6 +314,7 @@ void LightSystem::InitVertexLight(VertexLight& out, UActor* actor, UZoneInfo* zo
 			break;
 	}
 	out.NumLights = lightIndex;
+	}
 
 	out.CameraLocation = engine->CameraLocation;
 
@@ -331,4 +341,195 @@ void LightSystem::InitVertexLight(VertexLight& out, UActor* actor, UZoneInfo* zo
 			break;
 	}
 	out.NumFogBalls = fogIndex;
+}
+
+void LightSystem::SetupForActorDX(VertexLight& out, UActor* actor)
+{
+	// The original's SetupForActor picks an actor's lights once a draw
+	// (docs/re/render-dll.md, lighting -- meshes): the static lights that
+	// reach into the actor's leaf of the BSP, the moving lights in it, and
+	// the lights it had last frame, each counted at its strength at the
+	// actor's centre; the pick strongest first -- statics until 8 are
+	// taken, the others while fewer than 8 in all are, none below an
+	// eighth of the strongest; each picked light shadow-checked through
+	// the BSP every 16 frames by the frame count and the light's index,
+	// except a movable non-static one, always taken; and each fading in
+	// and out over about a third of a second, lighting as it fades.
+	auto& state = actor->MeshLights;
+	out.NumLights = 0;
+
+	if (actor->bUnlit())
+	{
+		state.List.clear();
+		return;
+	}
+
+	if (state.LastFrame != FrameCounter)
+	{
+		state.LastFrame = FrameCounter;
+		vec3 location = actor->Location();
+		UModel* model = Level->Model;
+
+		for (UActor::MeshLightEntry& entry : state.List)
+			entry.Picked = false;
+
+		// The candidates
+		Array<UActor*> candidates;
+		auto addCandidate = [&](UActor* light)
+		{
+			if (!light || light->bDeleteMe())
+				return;
+			if (light->LightType() == LT_None || light->LightBrightness() == 0)
+				return;
+			if (light->bSpecialLit() != actor->bSpecialLit())
+				return;
+			for (UActor* seen : candidates)
+				if (seen == light)
+					return;
+			candidates.push_back(light);
+		};
+
+		int leaf = model->FindLeafAt(location);
+		if (leaf >= 0 && (size_t)leaf < model->Leaves.size())
+		{
+			int index = model->Leaves[leaf].Permeating;
+			if (index >= 0)
+				for (size_t i = index; i < model->Lights.size() && model->Lights[i]; i++)
+					addCandidate(model->Lights[i]);
+		}
+		vec3 extents = actor->BspInfo.BoundingBox.extents();
+		LightTree.CollectLights(location, std::max(extents.x, std::max(extents.y, extents.z)));
+		for (UActor* light : LightTree.CollectedLights)
+		{
+			if (light->bDynamicLight() || (!light->bStatic() && !light->bNoDelete()))
+				addCandidate(light);
+		}
+		for (const UActor::MeshLightEntry& entry : state.List)
+			addCandidate(entry.Light);
+
+		// The strength at the actor's centre; a cylinder light counts with
+		// three quarters of its brightness and radius
+		struct Candidate
+		{
+			UActor* Light;
+			float Strength;
+			bool Static;
+		};
+		Array<Candidate> reaching;
+		for (UActor* light : candidates)
+		{
+			float radius = light->WorldLightRadius();
+			float brightnessScale = 1.0f;
+			if (light->LightEffect() == LE_Cylinder)
+			{
+				radius *= 0.75f;
+				brightnessScale = 0.75f;
+			}
+			if (radius <= 0.0f)
+				continue;
+			vec3 L = light->Location() - location;
+			float dist = std::sqrt(dot(L, L));
+			if (dist >= radius)
+				continue;
+			vec3 color = LightmapBuilder::GetLightColor(light);
+			float brightness = std::max(color.r, std::max(color.g, color.b)) * brightnessScale;
+			float strength = (1.0f - dist / radius) * brightness;
+			if (strength <= 0.0f)
+				continue;
+			reaching.push_back({ light, strength, (bool)light->bStatic() });
+		}
+		std::sort(reaching.begin(), reaching.end(), [](const Candidate& a, const Candidate& b) { return a.Strength > b.Strength; });
+
+		// The pick
+		Array<const Candidate*> taken;
+		for (const Candidate& candidate : reaching)
+		{
+			if (!candidate.Static)
+				continue;
+			taken.push_back(&candidate);
+			if (taken.size() == 8)
+				break;
+		}
+		for (const Candidate& candidate : reaching)
+		{
+			if (candidate.Static || taken.size() >= 8)
+				continue;
+			taken.push_back(&candidate);
+		}
+		float strongest = 0.0f;
+		for (const Candidate* candidate : taken)
+			strongest = std::max(strongest, candidate->Strength);
+
+		for (const Candidate* candidate : taken)
+		{
+			if (candidate->Strength < strongest * 0.125f)
+				continue;
+
+			UActor::MeshLightEntry* entry = nullptr;
+			for (UActor::MeshLightEntry& kept : state.List)
+			{
+				if (kept.Light == candidate->Light)
+				{
+					entry = &kept;
+					break;
+				}
+			}
+			if (!entry)
+			{
+				if (state.List.size() >= 16)
+					continue;
+				UActor::MeshLightEntry fresh;
+				fresh.Light = candidate->Light;
+				state.List.push_back(fresh);
+				entry = &state.List.back();
+			}
+			entry->Picked = true;
+			entry->Strength = candidate->Strength;
+
+			// Shadowed or not
+			UActor* light = entry->Light;
+			if (light->bMovable() && !light->bStatic())
+			{
+				entry->Shadowed = false;
+			}
+			else if (entry->LastShadowFrame < 0 ||
+				((FrameCounter + light->Name.GetCompareIndex()) & 15) == 0)
+			{
+				entry->Shadowed = engine->Level->Collision.TraceAnyHit(light->Location(), location, actor, false, true, true);
+				entry->LastShadowFrame = FrameCounter;
+			}
+		}
+
+		// The fades
+		float elapsed = clamp(LastTickElapsed, 0.0f, 0.1f);
+		for (size_t i = 0; i < state.List.size();)
+		{
+			UActor::MeshLightEntry& entry = state.List[i];
+			bool lit = entry.Picked && !entry.Shadowed;
+			entry.Fade = clamp(entry.Fade + (lit ? 3.0f : -3.0f) * elapsed, 0.0f, 1.0f);
+			if (!entry.Picked && entry.Fade <= 0.0f)
+			{
+				state.List.erase(state.List.begin() + i);
+				continue;
+			}
+			i++;
+		}
+	}
+
+	int lightIndex = 0;
+	for (const UActor::MeshLightEntry& entry : state.List)
+	{
+		if (entry.Fade <= 0.0f || entry.Light->bDeleteMe())
+			continue;
+		UActor* light = entry.Light;
+		out.Lights[lightIndex].Location = light->Location();
+		out.Lights[lightIndex].Color = LightmapBuilder::GetLightColor(light) * entry.Fade;
+		float invRadius = 1.0f / light->WorldLightRadius();
+		out.Lights[lightIndex].InvRadius = invRadius;
+		out.Lights[lightIndex].InvRadiusSquared = invRadius * invRadius;
+		lightIndex++;
+		if (lightIndex == VertexLight::MaxLights)
+			break;
+	}
+	out.NumLights = lightIndex;
 }

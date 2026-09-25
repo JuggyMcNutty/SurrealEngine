@@ -11,6 +11,27 @@
 #include "Utils/Logger.h"
 #include "Engine.h"
 
+int UModel::FindLeafAt(const vec3& location)
+{
+	if (Nodes.empty())
+		return -1;
+	vec4 p = vec4(location, 1.0f);
+	BspNode* nodes = Nodes.data();
+	BspNode* node = nodes;
+	while (true)
+	{
+		vec4 plane = { node->PlaneX, node->PlaneY, node->PlaneZ, -node->PlaneW };
+		bool swapFrontAndBack = dot(p, plane) < 0.0f;
+		int front = node->Front;
+		if (swapFrontAndBack)
+			front = node->Back;
+		if (front >= 0)
+			node = nodes + front;
+		else
+			return swapFrontAndBack ? node->Leaf0 : node->Leaf1;
+	}
+}
+
 void UModel::Load(ObjectStream* stream)
 {
 	UPrimitive::Load(stream);

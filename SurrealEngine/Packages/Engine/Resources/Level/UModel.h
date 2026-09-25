@@ -234,6 +234,9 @@ public:
 	Array<int32_t> LeafHulls;
 	Array<ConvexVolumeLeaf> Leaves;
 
+	// The leaf of the BSP a location stands in, or -1
+	int FindLeafAt(const vec3& location);
+
 	Array<UActor*> Lights;
 
 	int32_t RootOutside;

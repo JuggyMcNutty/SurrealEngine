@@ -101,29 +101,7 @@ void RenderSubsystem::DrawCoronasDX(VisibleFrame* frame)
 	vec3 eye = frame->ViewLocation.xyz();
 
 	// The viewer's leaf
-	int leaf = -1;
-	{
-		vec4 location = vec4(eye, 1.0f);
-		BspNode* nodes = model->Nodes.data();
-		BspNode* node = nodes;
-		while (true)
-		{
-			vec4 plane = { node->PlaneX, node->PlaneY, node->PlaneZ, -node->PlaneW };
-			bool swapFrontAndBack = dot(location, plane) < 0.0f;
-			int front = node->Front;
-			if (swapFrontAndBack)
-				front = node->Back;
-			if (front >= 0)
-			{
-				node = nodes + front;
-			}
-			else
-			{
-				leaf = swapFrontAndBack ? node->Leaf0 : node->Leaf1;
-				break;
-			}
-		}
-	}
+	int leaf = model->FindLeafAt(eye);
 
 	// Which lights, this frame
 	Array<UActor*> candidates;

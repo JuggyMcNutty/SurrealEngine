@@ -32,6 +32,9 @@ class VertexLight
 public:
 	vec3 GetVertexLight(const vec3& location, const vec3& normal, bool unlit, bool twosided)
 	{
+		if (OriginalFormula)
+			return GetVertexLightDX(location, normal, unlit, twosided);
+
 		vec3 dynamicLight(0.0f);
 		if (!unlit)
 		{
@@ -64,6 +67,52 @@ public:
 
 		// Clamp final result and make it all brighter to match lightmaps
 		vec3 color = (AmbientColor + dynamicLight) * 3.0f;
+		color.r = std::min(color.r, 1.0f);
+		color.g = std::min(color.g, 1.0f);
+		color.b = std::min(color.b, 1.0f);
+		return color;
+	}
+
+	// The original's per-vertex formula (docs/re/render-dll.md, lighting):
+	// a diffuse term, (cos + 1)^2 - 1.5 of the angle to the light, and a
+	// highlight, 6 cos^2 of the angle between the eye and the light's
+	// reflection when it heads toward the eye, both times 1 - d/r and the
+	// light's colour; the sum scaled by 1.4 ScaleGlow, the ambient added,
+	// each channel at most 1. An unlit draw is mid-grey.
+	vec3 GetVertexLightDX(const vec3& location, const vec3& normal, bool unlit, bool twosided)
+	{
+		if (unlit)
+			return vec3(0.5f);
+
+		vec3 sum(0.0f);
+		vec3 eye = CameraLocation - location;
+		float eyeLen2 = dot(eye, eye);
+		vec3 eyeDir = eyeLen2 > 0.0f ? eye / std::sqrt(eyeLen2) : vec3(0.0f);
+		for (int i = 0, count = NumLights; i < count; i++)
+		{
+			vec3 L = Lights[i].Location - location;
+			float lensqr = dot(L, L);
+			if (lensqr <= 0.0f)
+				continue;
+			float dist = std::sqrt(lensqr);
+			float attenuation = 1.0f - dist * Lights[i].InvRadius;
+			if (attenuation <= 0.0f)
+				continue;
+			vec3 Ldir = L / dist;
+			float c = dot(Ldir, normal);
+			if (twosided)
+				c = std::abs(c);
+			float diffuse = (c + 1.0f) * (c + 1.0f) - 1.5f;
+			if (diffuse < 0.0f)
+				diffuse = 0.0f;
+			float highlight = 0.0f;
+			float ce = dot(reflect(-Ldir, normal), eyeDir);
+			if (ce > 0.0f)
+				highlight = 6.0f * ce * ce;
+			if (diffuse + highlight > 0.0f)
+				sum += Lights[i].Color * ((diffuse + highlight) * attenuation);
+		}
+		vec3 color = sum * (1.4f * ScaleGlow) + AmbientColor;
 		color.r = std::min(color.r, 1.0f);
 		color.g = std::min(color.g, 1.0f);
 		color.b = std::min(color.b, 1.0f);
@@ -153,11 +202,13 @@ public:
 
 	vec3 AmbientColor;
 	float ScaleGlow;
-	enum { MaxLights = 8, MaxFogBalls = 4 };
+	bool OriginalFormula = false;
+	enum { MaxLights = 16, MaxFogBalls = 4 };
 	struct Light
 	{
 		vec3 Location;
 		float InvRadiusSquared;
+		float InvRadius;
 		vec3 Color;
 	} Lights[MaxLights];
 	int NumLights;
@@ -198,6 +249,7 @@ public:
 	TextureInfo GetLevelFogmap(BspSurface& surface, UZoneInfo* zoneActor, UModel* model);
 
 	void InitVertexLight(VertexLight& vertexlight, UActor* actor, UZoneInfo* zoneActor);
+	void SetupForActorDX(VertexLight& out, UActor* actor);
 
 	// The level's lights whose reach may take in a location, as of the last
 	// frame drawn: BeginFrame builds their tree from each actor with a light
@@ -223,6 +275,7 @@ private:
 
 	float AmbientGlowTime = 0.0f;
 	float AmbientGlowAmount = 0.0f;
+	float LastTickElapsed = 0.0f;
 
 	Array<UActor*> TempDynLightList;
 	LightActorTree LightTree;

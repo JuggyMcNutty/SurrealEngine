@@ -22,6 +22,7 @@ void LightSystem::Tick(float levelTimeElapsed)
 {
 	AmbientGlowTime = std::fmod(AmbientGlowTime + 0.8f * levelTimeElapsed, 1.0f);
 	AmbientGlowAmount = 0.30f + 0.20f * std::sin(radians(AmbientGlowTime * 360.0f));
+	LastTickElapsed = levelTimeElapsed;
 }
 
 void LightSystem::OnMapLoaded()

@@ -561,6 +561,23 @@ public:
 		Array<UActor*> List;
 	} TouchingLights;
 
+	// Deus Ex mesh lighting: the picked lights kept under the actor with
+	// their fades and shadow checks (docs/re/render-dll.md, lighting)
+	struct MeshLightEntry
+	{
+		UActor* Light = nullptr;
+		float Fade = 0.0f;
+		float Strength = 0.0f;
+		bool Shadowed = false;
+		bool Picked = false;
+		int LastShadowFrame = -1;
+	};
+	struct
+	{
+		Array<MeshLightEntry> List;
+		int LastFrame = -1;
+	} MeshLights;
+
 	// Fog between actor and camera
 	struct
 	{

@@ -20,7 +20,9 @@ bool VisibleMesh::DrawMesh(VisibleFrame* frame, UActor* actor, bool wireframe, b
 		return false;
 
 	engine->render->Stats.Actors++;
-	engine->Level->Light.UpdateLightList(actor);
+	// Deus Ex actors pick their lights in SetupForActorDX instead
+	if (!engine->LaunchInfo.IsDeusEx())
+		engine->Level->Light.UpdateLightList(actor);
 
 	// DrawDebugInfo(frame, actor);
 
