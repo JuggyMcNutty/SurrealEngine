@@ -9,6 +9,9 @@
 #include "Engine.h"
 #include "GameWindow.h"
 #include "RenderDevice/RenderDevice.h"
+#include "Package/PackageManager.h"
+#include "Packages/DeusEx/UDeusExSaveInfo.h"
+#include "Packages/Engine/Resources/UPalette.h"
 
 void URootWindow::EnablePositionalSound(std::optional<bool> bEnable)
 {
@@ -22,7 +25,13 @@ void URootWindow::EnableRendering(std::optional<bool> newRender)
 
 UObject* URootWindow::GenerateSnapshot(std::optional<bool> bFilter)
 {
-	LogUnimplemented("RootWindow.GenerateSnapshot");
+	// The original reads the rendered frame, averages it down to the size
+	// SetSnapshotSize gave, and stores it grey in an 8-bit texture
+	// (docs/re/extension-dll.md, save pictures). The fork's read-back
+	// (RenderDevice::ReadPixels) tears down the frame the renderer is
+	// overlapping, wherever it is called, so there is no picture yet --
+	// as the original itself saves none for its OpenGL driver. A capture
+	// point built into the renderer's own end of frame comes later.
 	return nullptr;
 }
 
@@ -91,7 +100,8 @@ void URootWindow::ResetRenderViewport()
 
 void URootWindow::SetSnapshotSize(float newWidth, float NewHeight)
 {
-	LogUnimplemented("RootWindow.SetSnapshotSize");
+	snapshotWidth() = (int)newWidth;
+	snapshotHeight() = (int)NewHeight;
 }
 
 void URootWindow::ShowCursor(std::optional<bool> bShow)

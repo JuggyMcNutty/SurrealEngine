@@ -2,6 +2,8 @@
 
 #include "UModalWindow.h"
 
+class UTexture;
+
 class URootWindow : public UModalWindow
 {
 public:
@@ -28,6 +30,7 @@ public:
 
 	bool SetRootFocusWindow(UWindow* NewFocusWindow);
 	void SetRootCursorPos(float newMouseX, float newMouseY);
+
 	UWindow* GetCursorFocus(float& relativeX, float& relativeY);
 	bool OnWindowMouseMove(const Point& pos);
 	bool OnWindowMouseDown(const Point& pos, EInputKey key);
