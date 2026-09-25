@@ -266,6 +266,8 @@ void Engine::Run()
 				// depending on leftover state.
 				if (UnrealURL(LevelInfo->NextURL()).HasOption("restart"))
 				{
+					if (packages->IsDeusEx())
+						DeleteSaveGameFiles("Current"); // the original's ?restart empties Current
 					// Passes the level's own TravelInfo back in, so it means to preserve it.
 					ClientTravelInfo.TravelType = ETravelType::TRAVEL_Relative;
 					LoadMap(LevelInfo->URL, Level->TravelInfo);
@@ -274,6 +276,7 @@ void Engine::Run()
 				else if (LevelInfo->bNextItems())
 				{
 					ClientTravelInfo.TravelType = ETravelType::TRAVEL_Relative;
+					DeusExPreTravel(UnrealURL(LevelInfo->URL, LevelInfo->NextURL()));
 					LoadMap(UnrealURL(LevelInfo->URL, LevelInfo->NextURL()), CreateTravelInfo(true));
 					LoginPlayer();
 				}
@@ -281,6 +284,7 @@ void Engine::Run()
 				{
 					// Deliberately carries nothing - it passes no travel info at all.
 					ClientTravelInfo.TravelType = ETravelType::TRAVEL_Absolute;
+					DeusExPreTravel(UnrealURL(LevelInfo->URL, LevelInfo->NextURL()));
 					LoadMap(UnrealURL(LevelInfo->URL, LevelInfo->NextURL()), {});
 					LoginPlayer();
 				}
@@ -289,6 +293,8 @@ void Engine::Run()
 
 		if (ClientTravelInfo.URL.HasOption("restart"))
 		{
+			if (packages->IsDeusEx())
+				DeleteSaveGameFiles("Current"); // the original's ?restart empties Current
 			LoadMap(LevelInfo->URL, Level->TravelInfo);
 			LoginPlayer();
 		}
@@ -306,6 +312,7 @@ void Engine::Run()
 
 			UnrealURL url(ClientTravelInfo.URL);
 			LogMessage("Client travel to " + url.ToString());
+			DeusExPreTravel(url);
 			LoadMap(url, CreateTravelInfo(ClientTravelInfo.TransferItems));
 			LoginPlayer();
 		}
@@ -680,7 +687,23 @@ void Engine::LoadMap(const UnrealURL& url, const std::map<std::string, std::stri
 
 	// Load map objects
 
-	LevelPackage = packages->LoadMap(url.Map);
+	bool loadedFromCurrent = false;
+	LevelPackage = nullptr;
+	if (packages->IsDeusEx() && dxTravelUsesCurrent)
+	{
+		dxTravelUsesCurrent = false;
+		// Within a mission, a map saved into Current is revisited as the
+		// player left it.
+		const std::string currentMap = "Current/" + url.Map + "." + packages->GetSaveExtension();
+		if (fs::exists(packages->GetSaveFolderPath() / currentMap))
+		{
+			LogMessage("Loading " + url.Map + " from Current");
+			LevelPackage = packages->LoadSaveFile(currentMap);
+			loadedFromCurrent = LevelPackage != nullptr;
+		}
+	}
+	if (!LevelPackage)
+		LevelPackage = packages->LoadMap(url.Map);
 
 	GetLevelInfoObject();
 
@@ -708,6 +731,12 @@ void Engine::LoadMap(const UnrealURL& url, const std::map<std::string, std::stri
 			actor = nullptr;
 		}
 	}
+
+	// A level from Current still holds the pawn that left it, as the
+	// original's does: GameInfo.Login finds and reuses it (its Player is
+	// None), so travel does not spawn a second one, and the pruned
+	// subsystems are made afresh by the game's own login.
+	(void)loadedFromCurrent;
 
 	LinkActorsToLevel();
 
@@ -969,9 +998,7 @@ void Engine::SaveGameToSlot(int32_t slotNum, const std::string& saveDescription)
 			dxSaveInfo->package->Save(dxSaveInfo, (currentFolder / saveInfoName).string());
 		}
 
-		const auto levelName = Level->package->GetPackageName().ToString() + "." + packages->GetSaveExtension();
-		fs::remove(saveSlotFolder / levelName);
-		LevelPackage->Save(Level, (saveSlotFolder / levelName).string());
+		SaveCurrentLevel(slotNum);
 
 		packages->RemoveSaveInfoPackage(slotFolderName);
 		packages->RemoveSaveInfoPackage("Current");
@@ -1064,6 +1091,76 @@ void Engine::DeleteGame(int32_t slot) const
 	const std::string name = SaveSlotFolderName(slot);
 	fs::remove_all(packages->GetSaveFolderPath() / name);
 	packages->RemoveSaveInfoPackage(name);
+}
+
+// A map's mission number is its name's two leading digits; anything else -1.
+int32_t Engine::DeusExMissionNumber(const std::string& mapName) const
+{
+	if (mapName.size() < 2 ||
+		mapName[0] < '0' || mapName[0] > '9' || mapName[1] < '0' || mapName[1] > '9')
+		return -1;
+	return (mapName[0] - '0') * 10 + (mapName[1] - '0');
+}
+
+// The original's Browse, before an ordinary map change: within one mission
+// the departing level is pruned and saved into Current; a new mission, a
+// map outside any, or a player starting a new game empties Current.
+void Engine::DeusExPreTravel(const UnrealURL& url)
+{
+	dxTravelUsesCurrent = false;
+	if (!packages->IsDeusEx() || !Level || url.Map.empty())
+		return;
+	if (url.HasOption("load") || url.HasOption("loadgame") || url.HasOption("loadonly") ||
+		url.HasOption("restart") || url.HasOption("entry"))
+		return;
+
+	bool startingNew = false;
+	if (auto player = UObject::TryCast<UDeusExPlayer>(viewport->Actor()))
+	{
+		if (player->bStartingNewGame())
+		{
+			startingNew = true;
+			player->bStartingNewGame() = false;
+		}
+	}
+
+	const int32_t next = DeusExMissionNumber(url.Map);
+	const int32_t current = DeusExLevelInfo ? DeusExLevelInfo->MissionNumber() : -1;
+	if (startingNew || next == -1 || next != current)
+	{
+		DeleteSaveGameFiles("Current");
+		return;
+	}
+
+	PruneTravelActors();
+	SaveCurrentLevel(-2);
+	dxTravelUsesCurrent = true;
+}
+
+// Destroys what travels with the player, so it is not saved twice: the
+// augmentations and skills with their managers. The original also destroys
+// the flag base and a carried decoration; the fork's flag base is transient
+// and never saved, and the fork keeps no offset for CarriedDecoration.
+void Engine::PruneTravelActors() const
+{
+	for (UActor* actor : Level->Actors)
+	{
+		if (actor && (actor->IsA("Augmentation") || actor->IsA("AugmentationManager") ||
+			actor->IsA("Skill") || actor->IsA("SkillManager")))
+			actor->Destroy();
+	}
+}
+
+// The level package into a save directory: -2 Current, -1 the quick save,
+// else the numbered slot. The file goes first, or the writer keeps a .old.
+void Engine::SaveCurrentLevel(int32_t slot) const
+{
+	const auto folder = packages->GetSaveFolderPath() / SaveSlotFolderName(slot);
+	if (!fs::exists(folder))
+		fs::create_directories(folder);
+	const auto levelName = Level->package->GetPackageName().ToString() + "." + packages->GetSaveExtension();
+	fs::remove(folder / levelName);
+	LevelPackage->Save(Level, (folder / levelName).string());
 }
 
 std::map<std::string, std::string> Engine::CreateTravelInfo(bool transferItems)

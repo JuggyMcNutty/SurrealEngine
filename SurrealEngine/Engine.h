@@ -86,6 +86,14 @@ public:
 	void CopySaveGameFiles(const std::string& fromFolder, const std::string& toFolder) const;
 	void DeleteSaveGameFiles(const std::string& folder) const;
 	void DeleteGame(int32_t slot) const;
+	// Deus Ex travel: within a mission the departing level is pruned and
+	// saved into Current, and a map saved there is revisited as the player
+	// left it; a new mission, or a player starting a new game, empties
+	// Current (docs/re/deusex-dll.md, travel and saving).
+	void DeusExPreTravel(const UnrealURL& url);
+	void PruneTravelActors() const;
+	void SaveCurrentLevel(int32_t slot) const;
+	int32_t DeusExMissionNumber(const std::string& mapName) const;
 	void UnloadMap();
 	void LoginPlayer();
 	void PossessSavedPlayer();
@@ -170,6 +178,7 @@ public:
 
 	Package* deusExPackage = nullptr;
 	UDeusExLevelInfo* DeusExLevelInfo = nullptr;
+	bool dxTravelUsesCurrent = false; // set by DeusExPreTravel, read once by LoadMap
 	struct
 	{
 		UnrealURL URL;
