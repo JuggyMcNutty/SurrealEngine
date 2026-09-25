@@ -1015,6 +1015,37 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 	TextureInfo texinfo;
 	UTexture* texinfoTexture = nullptr;
 
+	// The original's vertex budget, worked out each draw
+	// (docs/re/render-dll.md, mesh detail): it falls as one over the
+	// actor's depth in the view, sooner for a complex mesh and a wide
+	// view. Faces whose FaceLevel is past the clamped budget go; each kept
+	// corner walks its collapse list until its vertex is within it; and
+	// the top LODMorph fraction of the raw budget slides toward what it
+	// collapses to, texture coordinates with it, so detail fades rather
+	// than pops, beginning before the first vertex goes. A mesh with
+	// LODStrength 0 or without the tables is drawn whole.
+	bool lodActive = false;
+	uint32_t lodBudget = 0;
+	float lodMorphStart = 0.0f;
+	float lodMorphScale = 0.0f;
+	if (&faces == &mesh->Faces && mesh->LODStrength > 0.0f && mesh->ModelVerts > 0 &&
+		mesh->FaceLevel.size() >= mesh->Faces.size() &&
+		mesh->CollapseWedgeThus.size() >= mesh->Wedges.size() &&
+		mesh->CollapsePointThus.size() >= mesh->ModelVerts)
+	{
+		float depth = std::max((frame->Frame.WorldToView * vec4(actor->Location(), 1.0f)).z - mesh->LODZDisplace, 1.0f);
+		float resolutionTerm = 0.3f + 0.7f * frame->Frame.FX / 640.0f;
+		float complexityTerm = 0.25f + 0.003f * (float)mesh->ModelVerts;
+		float shapeLOD = 0.25f;
+		float factor = 430.0f * resolutionTerm * actor->DrawScale() * actor->LODBias() * mesh->MeshScaleMax /
+			(mesh->LODStrength * shapeLOD * std::tan(radians(frame->Frame.FovAngle) * 0.5f) * depth * complexityTerm);
+		float rawBudget = (float)mesh->ModelVerts * factor;
+		lodBudget = (uint32_t)clamp(rawBudget, (float)std::min((uint32_t)mesh->LODMinVerts, mesh->ModelVerts), (float)mesh->ModelVerts);
+		lodMorphStart = rawBudget * (1.0f - mesh->LODMorph);
+		lodMorphScale = rawBudget > lodMorphStart ? 1.0f / (rawBudget - lodMorphStart) : 0.0f;
+		lodActive = true;
+	}
+
 	// Consecutive faces with one texture and one set of flags go to the
 	// device in one call, which sets up the texture and pipeline once
 	faceBatch.clear();
@@ -1029,8 +1060,13 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 	};
 
 	GouraudVertex vertices[3];
+	size_t faceIndex = (size_t)-1;
 	for (const MeshFace& face : faces)
 	{
+		faceIndex++;
+		if (lodActive && mesh->FaceLevel[faceIndex] > lodBudget)
+			continue;
+
 		if (face.MaterialIndex >= mesh->Materials.size())
 			continue;
 
@@ -1088,7 +1124,15 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 		CachedMeshVertex* cached[3] = {};
 		for (int i = 0; i < 3; i++)
 		{
-			const MeshWedge& wedge = mesh->Wedges[face.Indices[i]];
+			// A corner past the budget walks down its collapse list
+			uint16_t wedgeIndex = face.Indices[i];
+			if (lodActive)
+			{
+				size_t steps = 0;
+				while (mesh->Wedges[wedgeIndex].Vertex >= lodBudget && steps++ < mesh->Wedges.size())
+					wedgeIndex = mesh->CollapseWedgeThus[wedgeIndex];
+			}
+			const MeshWedge& wedge = mesh->Wedges[wedgeIndex];
 
 			size_t vbase = (size_t)wedge.Vertex + baseVertexOffset;
 			size_t vindex = mesh->ReMapAnimVerts.empty() ? vbase : mesh->ReMapAnimVerts[vbase];
@@ -1116,6 +1160,21 @@ bool VisibleMesh::DrawLodMeshFaceDX(VisibleFrame* frame, UActor* actor, UActor* 
 				return false;
 			}
 			vertices[i].UV = { wedge.U * uscale, wedge.V * vscale };
+
+			// The top of the budget slides toward what it collapses to
+			float morphT = lodActive ? ((float)wedge.Vertex - lodMorphStart) * lodMorphScale : 0.0f;
+			if (morphT > 0.0f)
+			{
+				morphT = std::min(morphT, 1.0f);
+				size_t tbase = (size_t)mesh->CollapsePointThus[wedge.Vertex] + baseVertexOffset;
+				size_t tindex = mesh->ReMapAnimVerts.empty() ? tbase : (tbase < mesh->ReMapAnimVerts.size() ? mesh->ReMapAnimVerts[tbase] : tbase);
+				vec3 targetPoint, targetNormal;
+				if (animateVertex(tindex, targetPoint, targetNormal))
+					vertices[i].Point = mix(vertices[i].Point, targetPoint, morphT);
+				const MeshWedge& targetWedge = mesh->Wedges[mesh->CollapseWedgeThus[wedgeIndex]];
+				vertices[i].UV.x = mix(wedge.U * uscale, targetWedge.U * uscale, morphT);
+				vertices[i].UV.y = mix(wedge.V * vscale, targetWedge.V * vscale, morphT);
+			}
 		}
 
 		if (renderflags & PF_Environment)
