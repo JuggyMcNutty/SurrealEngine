@@ -109,7 +109,6 @@ void UActor::PlayAnim(const NameString& sequence, float rate, float tweenTime)
 
 void UActor::PlayBlendAnim(const NameString& sequenceName, float rate, float tweenTime, int blendSlot)
 {
-	LogUnimplemented("Actor.PlayBlendAnim");
 	if (blendSlot < 0 || blendSlot > 3)
 	{
 		LogMessage("Invalid channel for PlayBlendAnim!");
@@ -222,25 +221,17 @@ void UActor::TweenBlendAnim(const NameString& sequenceName, float time, int blen
 		return;
 	}
 	int numFrames = sequence->NumFrames;
-	LogMessage("TweenBlendAnim: seq='" + sequenceName.ToString() + "' slot=" + std::to_string(blendSlot) + " time=" + std::to_string(time) + " numFrames=" + std::to_string(numFrames) + " StartFrame=" + std::to_string(sequence->StartFrame));
 
+	// TweenAnim for a slot (docs/re/engine-dll.md, blend animations): from
+	// the slot's last pose toward the sequence's first frame
+	SetTweenFromBlendAnimFrame(blendSlot);
 	BlendAnimSequence()[blendSlot] = sequenceName;
-	BlendAnimLast()[blendSlot] = 0.0;
-	BlendAnimMinRate()[blendSlot] = 0.0;
-	BlendAnimRate()[blendSlot] = 0.0;
-	OldBlendAnimRate()[blendSlot] = 0.0;
-	if (time <= 0.0)
-	{
-		BlendTweenRate()[blendSlot] = 0.0;
-		BlendAnimFrame()[blendSlot] = 0.0;
-	}
-	else
-	{
-		BlendTweenRate()[blendSlot] = 1.0f / (numFrames * time);
-		BlendAnimFrame()[blendSlot] = 1.0f / numFrames;
-	}
-	// Don't worry about simblendanim for now
-	return;
+	BlendAnimFrame()[blendSlot] = time > 0.0f ? -1.0f / numFrames : 0.0f;
+	BlendAnimLast()[blendSlot] = 0.0f;
+	BlendAnimRate()[blendSlot] = 0.0f;
+	BlendAnimMinRate()[blendSlot] = 0.0f;
+	BlendTweenRate()[blendSlot] = time > 0.0f ? 1.0f / (numFrames * time) : 0.0f;
+	OldBlendAnimRate()[blendSlot] = 0.0f;
 }
 
 void UActor::LoopAnim(const NameString& sequence, float rate, float tweenTime, float minRate)
@@ -467,64 +458,62 @@ void UActor::TickAnimation(float elapsed)
 
 void UActor::TickBlendAnimation(float elapsed)
 {
-	for (int i = 0; elapsed > 0.0f && i < 4; i++)
+	// The original moves the slots inside the main animation's tick loop
+	// (docs/re/engine-dll.md, blend animations): each iteration moves
+	// every slot by the frame's time, a slot that ends or finishes its
+	// tween leaves the rest only the time over, and the iterations repeat
+	// until spent -- three moves in a frame whose main animation had no
+	// notify or end, so up to three times the slot's rate. The caller
+	// gates on the main animation playing or tweening.
+	for (int iteration = 0; iteration < 3 && elapsed > 0.0f; iteration++)
 	{
-		if (BlendAnimSequence()[i].IsNone())
-			continue;
-
-		if (BlendAnimFrame()[i] >= BlendAnimLast()[i])
-			continue;
-
-		float oldFrame = BlendAnimFrame()[i];
-
-		if (BlendAnimFrame()[i] < 0.0f)
+		for (int slot = 0; slot < 4; slot++)
 		{
-			BlendAnimFrame()[i] += elapsed * BlendTweenRate()[i];
-
-			if (BlendAnimFrame()[i] < 0.0f)
+			if (BlendAnimSequence()[slot].IsNone())
 				continue;
 
-			BlendAnimFrame()[i] = 0.0f;
-
-			elapsed = (BlendAnimFrame()[i] * elapsed) / (BlendAnimFrame()[i] - oldFrame);
-			continue;
-		}
-
-		if (BlendAnimRate()[i] < 0.0f)
-		{
-			float speed = length(Velocity());
-
-			float adjustedRate = -speed * BlendAnimRate()[i];
-
-			float minRate = BlendAnimLast()[i];
-			if (adjustedRate > minRate)
-				adjustedRate = minRate;
-
-			BlendAnimFrame()[i] += adjustedRate * elapsed;
-		}
-		else
-		{
-			BlendAnimFrame()[i] += BlendAnimRate()[i] * elapsed;
-		}
-
-		if (BlendAnimFrame()[i] >= BlendAnimLast()[i])
-		{
-			float endFrame = BlendAnimLast()[i];
-
-			BlendAnimFrame()[i] = endFrame;
-			BlendAnimRate()[i] = 0.0f;
-
-			elapsed = ((BlendAnimFrame()[i] - endFrame) * elapsed) / (BlendAnimFrame()[i] - oldFrame);
-
-			if (RemoteRole() < ENetRole::ROLE_SimulatedProxy)
+			float frame = BlendAnimFrame()[slot];
+			if (frame < 0.0f)
 			{
-				SimBlendAnim()[i].z = BlendAnimFrame()[i] * 10000.0f;
+				// A tween up from a negative frame
+				float tweenRate = BlendTweenRate()[slot];
+				if (tweenRate == 0.0f)
+					continue;
+				float to = frame + tweenRate * elapsed;
+				if (to >= 0.0f)
+				{
+					elapsed -= (0.0f - frame) / tweenRate;
+					BlendAnimFrame()[slot] = 0.0f;
+				}
+				else
+				{
+					BlendAnimFrame()[slot] = to;
+				}
+				continue;
+			}
 
-				float rate = BlendAnimRate()[i] * 5000.0f;
-				if (rate > 32767.0f)
-					rate = 32767.0f;
+			float last = BlendAnimLast()[slot];
+			if (frame >= last)
+				continue;
 
-				SimBlendAnim()[i].w = rate;
+			// The rate, or a velocity-scaled one
+			float rate = BlendAnimRate()[slot];
+			if (rate < 0.0f)
+				rate = std::max(BlendAnimMinRate()[slot], -rate * length(Velocity()));
+			if (rate == 0.0f)
+				continue;
+
+			float to = frame + rate * elapsed;
+			if (to >= last)
+			{
+				// The slot stops at the last frame
+				elapsed -= (last - frame) / rate;
+				BlendAnimFrame()[slot] = last;
+				BlendAnimRate()[slot] = 0.0f;
+			}
+			else
+			{
+				BlendAnimFrame()[slot] = to;
 			}
 		}
 	}

@@ -542,7 +542,8 @@ void NActor::PlayAnim(UObject* Self, const NameString& Sequence, std::optional<f
 
 void NActor::PlayBlendAnim(UObject* Self, const NameString& Sequence, std::optional<float> Rate, std::optional<float> TweenTime, std::optional<uint8_t> BlendSlot)
 {
-	UObject::Cast<UActor>(Self)->PlayBlendAnim(Sequence, Rate ? *Rate : 1.0f, TweenTime ? *TweenTime : 0.0f, BlendSlot ? *BlendSlot : 0);
+	// Rate 1, TweenTime -1 and slot 0 by default (docs/re/engine-dll.md)
+	UObject::Cast<UActor>(Self)->PlayBlendAnim(Sequence, Rate ? *Rate : 1.0f, TweenTime ? *TweenTime : -1.0f, BlendSlot ? *BlendSlot : 0);
 }
 
 void NActor::PlayOwnedSound(UObject* Self, UObject* Sound, std::optional<uint8_t> Slot, std::optional<float> Volume, std::optional<bool> bNoOverride, std::optional<float> Radius, std::optional<float> Pitch)

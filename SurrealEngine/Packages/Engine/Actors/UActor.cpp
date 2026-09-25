@@ -263,8 +263,10 @@ void UActor::Tick(float elapsed)
 		}
 	}
 
+	// The slots move only while the main animation plays or tweens
+	bool mainAnimMoving = IsAnimating() || (AnimFrame() < 0.0f && TweenRate() != 0.0f);
 	TickAnimation(elapsed);
-	if (engine->LaunchInfo.IsDeusEx())
+	if (engine->LaunchInfo.IsDeusEx() && mainAnimMoving)
 		TickBlendAnimation(elapsed);
 
 	float thinkElapsed = elapsed;
