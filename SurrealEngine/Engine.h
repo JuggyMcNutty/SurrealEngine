@@ -52,8 +52,6 @@ class UnrealURL;
 class VideoPlayer;
 class UnrealMipmap;
 class UFloatProperty;
-class UConversationMissionList;
-class UConversationList;
 class UDXSaveInfo;
 class UDeusExLevelInfo;
 class URootWindow;
@@ -115,8 +113,6 @@ public:
 	void PlayAVI(const Array<std::string>& args);
 	UnrealMipmap* PlayVideo(VideoPlayer* video, UnrealMipmap* background);
 
-	UConversationList* GetDeusExMission();
-
 	void UpdateAudio();
 
 	void OpenWindow();
@@ -157,7 +153,6 @@ public:
 	UCanvas* canvas = nullptr;
 	UGC* dxgc = nullptr;
 	UDXSaveInfo* dxSaveInfo = nullptr;
-	UConversationMissionList* dxConMissionList = nullptr;
 	UConsole* console = nullptr;
 	URootWindow* dxRootWindow = nullptr;
 

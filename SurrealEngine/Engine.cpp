@@ -41,13 +41,6 @@
 #include "Packages/Extension/Flags/UFlagBase.h"
 #include "Packages/Extension/Windows/UGC.h"
 #include "Packages/Extension/Windows/TabGroup/URootWindow.h"
-#include "Packages/ConSys/UConItem.h"
-#include "Packages/ConSys/UConversation.h"
-#include "Packages/ConSys/UConversationList.h"
-#include "Packages/ConSys/UConversationMissionList.h"
-#include "Packages/ConSys/Events/UConEvent.h"
-#include "Packages/ConSys/Events/UConEventTransferObject.h"
-#include "Packages/ConSys/Events/UConEventCheckObject.h"
 #include "Packages/DeusEx/UDeusExLevelInfo.h"
 #include "Packages/DeusEx/UDeusExPlayer.h"
 #include "Packages/DeusEx/UDeusExSaveInfo.h"
@@ -98,7 +91,6 @@ Engine::Engine(GameLaunchInfo launchinfo) : LaunchInfo(launchinfo)
 		// exported the DeusExSaveInfo class into SaveInfo.dxs, whose load
 		// then re-registered the class's natives, a fatal error.
 		dxSaveInfo = UObject::Cast<UDXSaveInfo>(packages->CreateEmptyPackage("SaveInfo")->NewObject("MyDeusExSaveInfo", deusExPackage->GetClass("DeusExSaveInfo"), ObjectFlags::NoFlags));
-		dxConMissionList = UObject::Cast<UConversationMissionList>(packages->GetPackage("DeusExConText")->GetUObject("ConversationMissionList", "ConMissionList"));
 	}
 
 	std::string consolestr = packages->GetIniValue("system", "Engine.Engine", "Console");
@@ -549,23 +541,6 @@ UnrealMipmap* Engine::PlayVideo(VideoPlayer* video, UnrealMipmap* background)
 		return nullptr;
 
 	return frame;
-}
-
-UConversationList* Engine::GetDeusExMission()
-{
-	if (!dxConMissionList || !DeusExLevelInfo)
-		return nullptr;
-
-	int missionNumber = DeusExLevelInfo->MissionNumber();
-	for (UConItem* item = dxConMissionList->missions(); item; item = item->Next())
-	{
-		auto mission = UObject::Cast<UConversationList>(item->ConObject());
-		if (mission->missionNumber() == missionNumber)
-		{
-			return mission;
-		}
-	}
-	return nullptr;
 }
 
 void Engine::UpdateAudio()
@@ -2272,62 +2247,10 @@ void Engine::GetLevelObject()
 			Exception::Throw("Could not find the DeusExLevelInfo object for " + url.Map + "!");
 		*/
 
-		// Link giveObject for all events in the mission
-		if (UConversationList* conList = GetDeusExMission())
-		{
-			for (UConItem* item = conList->conversations(); item; item = item->Next())
-			{
-				auto conversation = UObject::Cast<UConversation>(item->ConObject());
-				for (UConEvent* e = conversation->eventList(); e; e = e->nextEvent())
-				{
-					EEventType eventType = (EEventType)e->eventType();
-					if (eventType == EEventType::TransferObject)
-					{
-						if (auto transfer = UObject::Cast<UConEventTransferObject>(e))
-						{
-							UClass* cls = engine->packages->FindClass("DeusEx." + transfer->ObjectName());
-							if (!cls)
-								LogMessage("Could not find class for TransferObject: " + transfer->ObjectName());
-							transfer->giveObject() = cls;
-						}
-					}
-					else if (eventType == EEventType::CheckObject)
-					{
-						if (auto eventCheckObject = UObject::Cast<UConEventCheckObject>(e))
-						{
-							if (eventCheckObject->ObjectName().starts_with("NK_"))
-							{
-								eventCheckObject->checkObject() = nullptr;
-							}
-							else
-							{
-								UClass* cls = engine->packages->FindClass("DeusEx." + eventCheckObject->ObjectName());
-								if (!cls)
-									LogMessage("Could not find class for CheckObject: " + eventCheckObject->ObjectName());
-								eventCheckObject->checkObject() = cls;
-							}
-						}
-					}
-				}
-
-				// Remove comments from event lists:
-				while (conversation->eventList() && (EEventType)conversation->eventList()->eventType() == EEventType::Comment)
-					conversation->eventList() = conversation->eventList()->nextEvent();
-				UConEvent* cur = conversation->eventList();
-				while (cur != nullptr)
-				{
-					auto next = cur->nextEvent();
-					if (next && (EEventType)next->eventType() == EEventType::Comment)
-					{
-						cur->nextEvent() = next->nextEvent();
-					}
-					else
-					{
-						cur = next;
-					}
-				}
-			}
-		}
+		// The conversations' comment events stay: the script passes over
+		// them, and 11 jumps land on labels only a comment carries. Each
+		// event's item classes load when the conversation's events bind
+		// (UConversation::BindEventsToActor), as the original's do.
 	}
 }
 

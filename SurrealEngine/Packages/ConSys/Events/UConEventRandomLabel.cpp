@@ -26,25 +26,25 @@ int UConEventRandomLabel::GetLabelCount()
 
 std::string UConEventRandomLabel::GetRandomLabel()
 {
+	// The original's cycling: random when not cycling; otherwise the labels
+	// in turn and then, once every label has had its turn, the last forever
+	// (bCycleOnce), random forever (bCycleRandom), or around again.
 	int count = (int)labels.size();
-	if (labels.size() <= 0)
+	if (count <= 0)
 		return {};
-	int index;
-	if (cycleIndex() == count)
+
+	if (!bCycleEvents())
+		return labels[std::rand() % count];
+
+	if (cycleIndex() >= count)
+	{
 		bLabelsCycled() = true;
-
-	if (!bCycleEvents() || (bCycleRandom() && bLabelsCycled()))
-		index = std::rand() % count;
-	else if (!bCycleOnce())
-	{
-		index = cycleIndex() % count;
-		cycleIndex()++;
-	}
-	else
-	{
-		index = cycleIndex() % count;
-		cycleIndex()++;
+		if (bCycleRandom())
+			return labels[std::rand() % count];
+		if (bCycleOnce())
+			return labels[count - 1];
+		cycleIndex() = 0;
 	}
 
-	return labels[index];
+	return labels[cycleIndex()++];
 }

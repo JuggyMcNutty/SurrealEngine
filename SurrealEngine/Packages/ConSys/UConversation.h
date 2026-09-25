@@ -2,6 +2,7 @@
 
 #include "UConObject.h"
 
+class UActor;
 class UConEvent;
 class UConFlagRef;
 
@@ -13,6 +14,7 @@ public:
 	void BindActorEvents(UObject* actorToBind);
 	void BindEvents(UObject** conBoundActors, UObject* invokeActor);
 	void ClearBindEvents();
+	bool BindEventsToActor(UActor* actor, UActor* invokeActor);
 	UObject* CreateConCamera();
 	UObject* CreateFlagRef(const NameString& FlagName, bool flagValue);
 	UObject* GetSpeechAudio(int soundID);
