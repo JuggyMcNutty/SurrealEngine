@@ -78,11 +78,13 @@ public:
 	void ToggleRowSelection(int rowId);
 
 	void DispatchListSelectionChanged();
+	void DispatchListRowActivated();
 
 	void InitWindow() override;
 	void DrawWindow(UGC* gc) override;
 	bool MouseButtonPressed(float pointX, float pointY, EInputKey button, int numClicks) override;
 	bool MouseButtonReleased(float pointX, float pointY, EInputKey button, int numClicks) override;
+	bool VirtualKeyPressed(EInputKey key, bool bRepeat) override;
 
 	struct Column
 	{
@@ -94,19 +96,30 @@ public:
 		std::optional<std::string> format;
 		float width = 0.0f;
 		bool hidden = false;
+		bool sortReverse = false;
+		bool sortCaseSensitive = false;
 	};
 	std::vector<Column> columns;
+
+	struct Cell
+	{
+		std::string text;
+		float value = 0.0f;
+	};
 
 	struct Item
 	{
 		int id = 0;
-		std::vector<std::string> cells;
+		std::vector<Cell> cells;
 		int clientInt = 0;
 		UObject* clientObj = nullptr;
 		bool selected = false;
 	};
 	std::vector<Item> items;
 	int nextRowId = 1;
+
+	// The sort keys, first compared first; a column not here is not a key.
+	std::vector<int> sortColumns;
 
 	Color highlightTextColor = { 255,255,255,255 };
 
@@ -137,4 +150,17 @@ public:
 	float& remainingDelay() { return Value<float>(PropOffsets_ListWindow.remainingDelay); }
 	float& rowMargin() { return Value<float>(PropOffsets_ListWindow.rowMargin); }
 	//DynamicArray& rows() { return Value<DynamicArray>(PropOffsets_ListWindow.rows); }
+
+private:
+	void SplitRow(Item& item, const std::string& rowStr);
+	void UpdateCellValue(Item& item, int colIndex);
+	std::string FieldDisplayText(const Item& item, int colIndex);
+	float MeasureText(UFont* colFont, const std::string& text);
+	float GetLineHeight();
+	void AutoExpandColumn(int colIndex, const std::string& displayText);
+	void MoveToRow(int index, bool bSelect, bool bClearRows, bool bDrag);
+	void ActivateRow();
+	bool RowLess(const Item& a, const Item& b);
+	void SortChanged();
+	static float StringToFloat(const std::string& text);
 };
