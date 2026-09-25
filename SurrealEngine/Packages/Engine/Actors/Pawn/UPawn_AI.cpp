@@ -8,6 +8,9 @@
 #include "Packages/Engine/Actors/Info/UPlayerReplicationInfo.h"
 #include "Packages/Engine/Resources/Level/ULevel.h"
 #include "Packages/Engine/Resources/Level/UModel.h"
+#include "Packages/Engine/Actors/NavigationPoint/UNavigationPoint.h"
+#include <queue>
+#include <climits>
 #include "Utils/Logger.h"
 #include "Engine.h"
 
@@ -419,4 +422,309 @@ vec3 UPawn::EAdjustJump()
 		horizontalVel = horizontalVel * (groundSpeed / horizSpeed);
 
 	return horizontalVel + vec3(0.0f, 0.0f, jumpZ);
+}
+
+// The original's calcMoveFlags: which reach specs the pawn may use.
+int UPawn::CalcMoveFlags()
+{
+	int flags = 0;
+	if (bCanWalk()) flags |= 1;      // R_WALK
+	if (bCanFly()) flags |= 2;       // R_FLY
+	if (bCanSwim()) flags |= 4;      // R_SWIM
+	if (bCanJump()) flags |= 8;      // R_JUMP
+	if (bCanOpenDoors()) flags |= 16;   // R_DOOR
+	if (bCanDoSpecial()) flags |= 32;   // R_SPECIAL
+	return flags;
+}
+
+// The original's AIDirectionReachable (0x103c78a0): whether the pawn can
+// get, along a direction, to a spot whose distance from focus is between
+// the two bounds. It moves the pawn itself in steps of its collision
+// radius (held between 5 and 25 units, at most 100 of them), each the
+// engine's own walk, fly or swim move, and puts it back.
+bool UPawn::AIDirectionReachable(const vec3& focus, int yaw, int pitch, float minDist, float maxDist, vec3& bestDest)
+{
+	// A copy: the caller may hand the pawn's own Location(), a reference
+	// into its property data, and the pawn moves below.
+	vec3 focusPoint = focus;
+	vec3 startLocation = Location();
+	vec3 startVelocity = Velocity();
+	bestDest = startLocation;
+
+	// In a water zone it swims, along yaw and pitch; otherwise walking (or
+	// swimming out of water) walks along the yaw alone and flying flies
+	// along both; any other physics fails.
+	bool inWater = Region().Zone && Region().Zone->bWaterZone();
+	uint8_t physics = Physics();
+	enum class Mode { Walk, Fly, Swim };
+	Mode mode;
+	if (inWater)
+		mode = Mode::Swim;
+	else if (physics == PHYS_Walking || physics == PHYS_Swimming)
+		mode = Mode::Walk;
+	else if (physics == PHYS_Flying)
+		mode = Mode::Fly;
+	else
+		return false;
+
+	Rotator direction((mode == Mode::Walk) ? 0 : pitch, yaw, 0);
+	vec3 dir = Coords::Rotation(direction).XAxis;
+
+	float step = std::clamp(CollisionRadius(), 5.0f, 25.0f);
+	float maxStep = MaxStepHeight();
+
+	// A walk step goes up, along and back to the floor; a drop past
+	// MaxStepHeight below the start is a ledge, undone.
+	enum class StepResult { Moved, Blocked, Ledge };
+	auto moveStep = [&](float stepSize) -> StepResult
+	{
+		vec3 delta = dir * stepSize;
+		if (mode != Mode::Walk)
+			return TryMove(delta).Fraction < 1.0f ? StepResult::Blocked : StepResult::Moved;
+
+		vec3 before = Location();
+		TryMove(vec3(0.0f, 0.0f, maxStep));
+		float wentUp = Location().z - before.z;
+		CollisionHit lateral = TryMove(delta);
+		CollisionHit down = TryMove(vec3(0.0f, 0.0f, -(wentUp + maxStep)));
+		if (down.Fraction == 1.0f)
+		{
+			// No floor within MaxStepHeight below where it started: a ledge.
+			SetLocation(before);
+			return StepResult::Ledge;
+		}
+		if (lateral.Fraction < 0.5f)
+			return StepResult::Blocked;
+		return StepResult::Moved;
+	};
+
+	// A pain zone whose damage the pawn does not resist, and the void,
+	// stop it; so does entering water, or leaving it when swimming.
+	auto zoneStops = [&]() -> bool
+	{
+		if (Region().ZoneNumber == 0)
+			return true;
+		UZoneInfo* zone = Region().Zone;
+		if (zone && zone->bPainZone() && zone->DamageType() != ReducedDamageType())
+			return true;
+		bool nowInWater = zone && zone->bWaterZone();
+		return (mode == Mode::Swim) ? !nowInWater : nowInWater;
+	};
+
+	float prevDist = length(startLocation - focusPoint);
+	bool prevIn = prevDist >= minDist && prevDist <= maxDist;
+	bool found = false;
+	float best = -1.0f;
+	bool triedLedgeStep = false;
+
+	for (int i = 0; i < 100; i++)
+	{
+		StepResult result = moveStep(step);
+		if (result == StepResult::Ledge && mode == Mode::Walk && !triedLedgeStep)
+		{
+			// A walk stopped by a ledge tries once more with a step of
+			// MaxStepHeight.
+			triedLedgeStep = true;
+			result = moveStep(maxStep);
+		}
+		if (result != StepResult::Moved)
+			break;
+		if (zoneStops())
+			break;
+
+		float dist = length(Location() - focusPoint);
+		bool inRange = dist >= minDist && dist <= maxDist;
+		if (inRange)
+		{
+			// While the spot is in range it goes on, keeping the farthest.
+			if (dist > best)
+			{
+				best = dist;
+				bestDest = Location();
+				found = true;
+			}
+			// It stops on coming into the range from beyond.
+			if (!prevIn && prevDist > maxDist)
+				break;
+		}
+		else
+		{
+			// It stops on leaving the range, or on crossing it in one
+			// step, which counts as found.
+			if (prevIn)
+				break;
+			if ((prevDist < minDist && dist > maxDist) || (prevDist > maxDist && dist < minDist))
+			{
+				bestDest = Location();
+				found = true;
+				break;
+			}
+		}
+		prevDist = dist;
+		prevIn = inRange;
+	}
+
+	SetLocation(startLocation);
+	Velocity() = startVelocity;
+	return found;
+}
+
+// The original's AIPickRandomDestination (0x103c7fc0): up to tries
+// directions from RandomBiasedRotation, each tested with
+// AIDirectionReachable; a multiplier below 1 stops the pawn short of what
+// it can reach.
+bool UPawn::AIPickRandomDestination(float minDist, float maxDist, int centralYaw, float yawDistribution, int centralPitch, float pitchDistribution, int tries, float multiplier, vec3& dest)
+{
+	dest = Location();
+	tries = std::max(tries, 1);
+	multiplier = std::clamp(multiplier, 0.0001f, 1.0f);
+	bool walking = !(Region().Zone && Region().Zone->bWaterZone()) && Physics() != PHYS_Flying;
+
+	for (int i = 0; i < tries; i++)
+	{
+		Rotator direction = UActor::RandomBiasedRotation(centralYaw, yawDistribution, walking ? 0 : centralPitch, pitchDistribution);
+		vec3 found;
+		if (!AIDirectionReachable(Location(), direction.Yaw, direction.Pitch, minDist / multiplier, maxDist / multiplier, found))
+			continue;
+		if (multiplier < 1.0f)
+		{
+			// Try again to multiplier of the distance reached, so the pawn
+			// stops short of what it can reach.
+			float reached = length(found - Location()) * multiplier;
+			if (!AIDirectionReachable(Location(), direction.Yaw, direction.Pitch, std::min(minDist, reached), reached, found))
+				continue;
+		}
+		dest = found;
+		return true;
+	}
+	return false;
+}
+
+// The original's GetPathnodeList (0x103c6490), which ReachablePathnodes
+// iterates and ComputePathnodeDistances seeds from.
+Array<std::pair<UNavigationPoint*, float>> UPawn::GetPathnodeList(UActor* fromPoint, bool usePrunedPaths)
+{
+	Array<std::pair<UNavigationPoint*, float>> nodes;
+
+	// The start node: FromPoint when it is a navigation point; else the
+	// pawn's MoveTarget when that is one the pawn overlaps; else the first
+	// in the level's list the pawn overlaps.
+	UNavigationPoint* start = UObject::TryCast<UNavigationPoint>(fromPoint);
+	if (!start)
+	{
+		if (UNavigationPoint* target = UObject::TryCast<UNavigationPoint>(MoveTarget()))
+		{
+			if (IsOverlapping(target))
+				start = target;
+		}
+	}
+	if (!start)
+	{
+		for (UNavigationPoint* nav = Level()->NavigationPointList(); nav; nav = nav->nextNavigationPoint())
+		{
+			if (IsOverlapping(nav))
+			{
+				start = nav;
+				break;
+			}
+		}
+	}
+
+	if (start)
+	{
+		// The far end of each of the start's paths whose reach spec the
+		// pawn fits and may use, at the spec's distance.
+		int moveFlags = CalcMoveFlags();
+		auto& specs = XLevel()->ReachSpecs;
+		auto addPaths = [&](FixedArrayView<int, 16> paths)
+		{
+			for (int i = 0; i < 16 && nodes.size() < 32; i++)
+			{
+				int index = paths[i];
+				if (index < 0 || (size_t)index >= specs.size())
+					continue;
+				const LevelReachSpec& spec = specs[index];
+				if (!spec.endActor || spec.endActor == start)
+					continue;
+				if (spec.collisionRadius < (int)CollisionRadius() || spec.collisionHeight < (int)CollisionHeight())
+					continue;
+				if ((spec.reachFlags & moveFlags) != spec.reachFlags)
+					continue;
+				nodes.push_back({ spec.endActor, (float)spec.distance });
+			}
+		};
+		addPaths(start->Paths());
+		if (usePrunedPaths)
+			addPaths(start->PrunedPaths());
+	}
+	else
+	{
+		// With no start node, the nearest nodes within 1,000 units of
+		// FromPoint, or of the pawn, that the pawn can reach, at the
+		// straight distance.
+		vec3 from = fromPoint ? UObject::Cast<UActor>(fromPoint)->Location() : Location();
+		for (UNavigationPoint* nav = Level()->NavigationPointList(); nav; nav = nav->nextNavigationPoint())
+		{
+			float dist = length(nav->Location() - from);
+			if (dist > 1000.0f)
+				continue;
+			if (!ActorReachable(nav, true))
+				continue;
+			nodes.push_back({ nav, dist });
+		}
+	}
+
+	std::sort(nodes.begin(), nodes.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
+	if (nodes.size() > 32)
+		nodes.resize(32);
+	return nodes;
+}
+
+// The original's ComputePathnodeDistances (0x103c8910): clears the paths,
+// then sets each node's visitedWeight to its shortest distance over the
+// path network from GetPathnodeList's nodes. No script calls it.
+void UPawn::ComputePathnodeDistances(UActor* startActor)
+{
+	for (UNavigationPoint* nav = Level()->NavigationPointList(); nav; nav = nav->nextNavigationPoint())
+		nav->visitedWeight() = INT_MAX;
+
+	using Entry = std::pair<float, UNavigationPoint*>;
+	std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue;
+	for (auto& [node, dist] : GetPathnodeList(startActor, false))
+	{
+		if ((int)dist < node->visitedWeight())
+		{
+			node->visitedWeight() = (int)dist;
+			queue.push({ dist, node });
+		}
+	}
+
+	int moveFlags = CalcMoveFlags();
+	auto& specs = XLevel()->ReachSpecs;
+	while (!queue.empty())
+	{
+		auto [dist, node] = queue.top();
+		queue.pop();
+		if ((int)dist > node->visitedWeight())
+			continue;
+		for (int i = 0; i < 16; i++)
+		{
+			int index = node->Paths()[i];
+			if (index < 0 || (size_t)index >= specs.size())
+				continue;
+			const LevelReachSpec& spec = specs[index];
+			if (!spec.endActor)
+				continue;
+			if (spec.collisionRadius < (int)CollisionRadius() || spec.collisionHeight < (int)CollisionHeight())
+				continue;
+			if ((spec.reachFlags & moveFlags) != spec.reachFlags)
+				continue;
+			int next = node->visitedWeight() + spec.distance;
+			if (next < spec.endActor->visitedWeight())
+			{
+				spec.endActor->visitedWeight() = next;
+				queue.push({ (float)next, spec.endActor });
+			}
+		}
+	}
 }

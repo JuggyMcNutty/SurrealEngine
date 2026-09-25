@@ -613,6 +613,10 @@ public:
 	// (its offset found once), so stasis destroys it.
 	bool InStasis();
 	bool IsTransient();
+
+	// The original's RandomBiasedRotation: a random rotation about the
+	// central one, each distribution pulling the result in toward it.
+	static Rotator RandomBiasedRotation(int centralYaw, float yawDistribution, int centralPitch, float pitchDistribution);
 	int8_t TransientPropSearched = 0;
 	PropertyDataOffset TransientPropOffset;
 

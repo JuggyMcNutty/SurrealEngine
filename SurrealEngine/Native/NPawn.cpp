@@ -308,19 +308,20 @@ void NPawn::AICanSmell(UObject* Self, UObject* Other, std::optional<float> Smell
 
 void NPawn::AIDirectionReachable(UObject* Self, const vec3& Focus, int Yaw, int Pitch, float minDist, float maxDist, vec3& bestDest, BitfieldBool& ReturnValue)
 {
-	LogUnimplemented("Pawn.AIDirectionReachable");
-	ReturnValue = false;
+	UPawn* selfPawn = UObject::Cast<UPawn>(Self);
+	ReturnValue = selfPawn->AIDirectionReachable(Focus, Yaw, Pitch, minDist, maxDist, bestDest);
 }
 
 void NPawn::AIPickRandomDestination_Deus(UObject* Self, float minDist, float maxDist, int centralYaw, float yawDistribution, int centralPitch, float pitchDistribution, int tries, float multiplier, vec3& dest, BitfieldBool& ReturnValue)
 {
-	LogUnimplemented("Pawn.AIPickRandomDestination_Deus");
-	ReturnValue = false;
+	UPawn* selfPawn = UObject::Cast<UPawn>(Self);
+	ReturnValue = selfPawn->AIPickRandomDestination(minDist, maxDist, centralYaw, yawDistribution, centralPitch, pitchDistribution, tries, multiplier, dest);
 }
 
 void NPawn::ComputePathnodeDistances(UObject* Self, std::optional<UObject*> startActor)
 {
-	LogUnimplemented("Pawn.ComputePathnodeDistances");
+	UPawn* selfPawn = UObject::Cast<UPawn>(Self);
+	selfPawn->ComputePathnodeDistances(startActor ? UObject::Cast<UActor>(*startActor) : nullptr);
 }
 
 void NPawn::LineOfSightTo_Deus(UObject* Self, UObject* Other, std::optional<bool> bIgnoreDistance, BitfieldBool& ReturnValue)
@@ -330,10 +331,33 @@ void NPawn::LineOfSightTo_Deus(UObject* Self, UObject* Other, std::optional<bool
 	ReturnValue = selfPawn->LineOfSightTo(otherActor, bIgnoreDistance ? *bIgnoreDistance : false);
 }
 
+// Up to 32 navigation points and their distances, nearest first, from the
+// original's GetPathnodeList; BaseClass is read and not used.
+class ReachablePathnodesIterator : public Iterator
+{
+public:
+	ReachablePathnodesIterator(Array<std::pair<UNavigationPoint*, float>> nodes, UObject** navPoint, float* distance) : Nodes(std::move(nodes)), NavPoint(navPoint), Distance(distance) {}
+	bool Next() override
+	{
+		if (Pos >= Nodes.size())
+			return false;
+		*NavPoint = Nodes[Pos].first;
+		*Distance = Nodes[Pos].second;
+		Pos++;
+		return true;
+	}
+
+private:
+	Array<std::pair<UNavigationPoint*, float>> Nodes;
+	size_t Pos = 0;
+	UObject** NavPoint = nullptr;
+	float* Distance = nullptr;
+};
+
 void NPawn::ReachablePathnodes(UObject* Self, UObject* BaseClass, UObject*& NavPoint, UObject* FromPoint, float& distance, std::optional<bool> bUsePrunedPaths)
 {
-	LogUnimplemented("Pawn.ReachablePathnodes");
-	Frame::CreatedIterator = std::make_unique<EmptyIterator>();
+	UPawn* selfPawn = UObject::Cast<UPawn>(Self);
+	Frame::CreatedIterator = std::make_unique<ReachablePathnodesIterator>(selfPawn->GetPathnodeList(UObject::Cast<UActor>(FromPoint), bUsePrunedPaths.value_or(false)), &NavPoint, &distance);
 }
 
 void NPawn::StrafeFacing_Deus(UObject* Self, const vec3& NewDestination, UObject* NewTarget, std::optional<float> speed)

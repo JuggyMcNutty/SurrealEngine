@@ -184,6 +184,29 @@ bool UActor::Destroy()
 	return true;
 }
 
+// The original's RandomBiasedRotation (0x1036d030): yaw up to half a turn
+// (32,768) either way and pitch up to a quarter (16,384). A distribution of
+// 0 spreads the offset evenly over the range, 1 gives the centre: with
+// a = (1 + d) / 2 and a uniform fraction x of the range, the offset is
+// x(1 - a)/a up to a, and (1 - a) + (x - a)a/(1 - a) above.
+Rotator UActor::RandomBiasedRotation(int centralYaw, float yawDistribution, int centralPitch, float pitchDistribution)
+{
+	auto biasedOffset = [](float distribution, int range) -> int
+	{
+		float d = std::clamp(distribution, 0.0f, 1.0f);
+		float a = (1.0f + d) * 0.5f;
+		float x = (float)std::rand() / (float)RAND_MAX;
+		float fraction;
+		if (x <= a)
+			fraction = x * (1.0f - a) / a;
+		else
+			fraction = (1.0f - a) + (x - a) * a / (1.0f - a);
+		float sign = (std::rand() & 1) ? 1.0f : -1.0f;
+		return (int)(sign * fraction * (float)range);
+	};
+	return Rotator(centralPitch + biasedOffset(pitchDistribution, 16384), centralYaw + biasedOffset(yawDistribution, 32768), 0);
+}
+
 bool UActor::InStasis()
 {
 	// The original's InStasis, all of which must hold: bStasis;

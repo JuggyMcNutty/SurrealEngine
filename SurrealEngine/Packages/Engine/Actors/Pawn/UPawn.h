@@ -75,6 +75,16 @@ public:
 	// Deus Ex AI functions
 	float AICanHear(UActor* other, std::optional<float> volume, std::optional<float> radius);
 	float AICanSee(UActor* other, std::optional<float> visibility, std::optional<bool> bCheckVisibility, std::optional<bool> bCheckDir, std::optional<bool> bCheckCylinder, std::optional<bool> bCheckLOS);
+	bool AIDirectionReachable(const vec3& focus, int yaw, int pitch, float minDist, float maxDist, vec3& bestDest);
+	bool AIPickRandomDestination(float minDist, float maxDist, int centralYaw, float yawDistribution, int centralPitch, float pitchDistribution, int tries, float multiplier, vec3& dest);
+	// The pawn's movement capabilities as UE1's reach-spec flags
+	// (R_WALK 1, R_FLY 2, R_SWIM 4, R_JUMP 8, R_DOOR 16, R_SPECIAL 32).
+	int CalcMoveFlags();
+	// The original's GetPathnodeList: up to 32 navigation points and their
+	// distances, nearest first, from a start node's paths, or the nearest
+	// reachable nodes within 1,000 units when there is no start node.
+	Array<std::pair<UNavigationPoint*, float>> GetPathnodeList(UActor* fromPoint, bool usePrunedPaths);
+	void ComputePathnodeDistances(UActor* startActor);
 	float AICanSmell(UActor* other, std::optional<float> smell);
 
 	float& AccelRate() { return Value<float>(PropOffsets_Pawn.AccelRate); }
