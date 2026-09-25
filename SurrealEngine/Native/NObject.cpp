@@ -97,7 +97,7 @@ void NObject::RegisterFunctions()
 	RegisterVMNativeFunc_3("Object", "GreaterGreater_VectorRotator", &NObject::GreaterGreater_VectorRotator, 276);
 	RegisterVMNativeFunc_3("Object", "Greater_FloatFloat", &NObject::Greater_FloatFloat, 177);
 	RegisterVMNativeFunc_3("Object", "Greater_IntInt", &NObject::Greater_IntInt, 151);
-	RegisterVMNativeFunc_3("Object", "Greater_StrStr", &NObject::Greater_StrStr, 1186);
+	RegisterVMNativeFunc_3("Object", "Greater_StrStr", &NObject::Greater_StrStr, 116);
 	if (engine->LaunchInfo.IsUnreal1_227())
 		RegisterVMNativeFunc_4("Object", "InStr", &NObject::InStr_U227, 126);
 	else
@@ -278,6 +278,7 @@ void NObject::RegisterFunctions()
 	{
 		RegisterVMNativeFunc_2("Object", "AllObjects", &NObject::AllObjects_DeusEx, 1001);
 		RegisterVMNativeFunc_1("Object", "CriticalDelete", &NObject::CriticalDelete, 751);
+		RegisterVMNativeFunc_3("Object", "GetConfig", &NObject::GetConfig, 0);
 	}
 
 	// Package 61 stuff
@@ -602,7 +603,8 @@ void NObject::Divide_U227(std::string& Src, std::string& Divider, std::string& L
 
 void NObject::DivideEqual_ByteByte(uint8_t& A, uint8_t B, uint8_t& ReturnValue)
 {
-	ReturnValue = A /= B;
+	// By zero: 0, and the byte keeps its value, as the original answers.
+	ReturnValue = B != 0 ? (A /= B) : 0;
 }
 
 void NObject::DivideEqual_CoordsRotator_U227(Coords& A, Rotator& B, Coords& ReturnValue)
@@ -642,7 +644,8 @@ void NObject::Divide_FloatFloat(float A, float B, float& ReturnValue)
 
 void NObject::Divide_IntInt(int A, int B, int& ReturnValue)
 {
-	ReturnValue = A / B;
+	// By zero: 0, as the original answers; the CPU exception would kill the engine.
+	ReturnValue = B != 0 ? A / B : 0;
 }
 
 void NObject::Divide_RotatorFloat(const Rotator& A, float B, Rotator& ReturnValue)
@@ -1684,6 +1687,13 @@ void NObject::AllObjects_DeusEx(UObject* Self, UObject* BaseClass, UObject*& Act
 void NObject::GetLanguage(std::string& ReturnValue)
 {
 	ReturnValue = "en"; // Is this correct?
+}
+
+void NObject::GetConfig(const std::string& section, const std::string& key, std::string& ReturnValue)
+{
+	// Deus Ex, called by name (no native number): a key's value in the system
+	// ini, or an empty string when the section or the key is not there.
+	ReturnValue = engine->packages->GetIniValue("system", section, key, "");
 }
 
 void NObject::GetConfigString_Nerf(const std::string& section, const std::string& key, const std::string& iniName, std::string& ReturnValue)

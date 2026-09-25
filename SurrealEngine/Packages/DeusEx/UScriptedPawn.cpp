@@ -60,6 +60,10 @@ uint8_t UScriptedPawn::GetAllianceType(const NameString& AllianceName)
 
 uint8_t UScriptedPawn::GetPawnAllianceType(UPawn* QueryPawn)
 {
+	// None is Neutral, as the original answers it.
+	if (!QueryPawn)
+		return (uint8_t)EAllianceType::ALLIANCE_Neutral;
+
 	if (UScriptedPawn* qp = UObject::TryCast<UScriptedPawn>(QueryPawn))
 	{
 		uint8_t othersAlliance = qp->GetAllianceType(Alliance());

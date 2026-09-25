@@ -17,6 +17,14 @@ public:
 	size_t EndStatementIndex = 0;
 };
 
+// Yields nothing. For iterator natives whose real walk is not written yet:
+// the foreach still needs an iterator, or the VM stops the game.
+class EmptyIterator : public Iterator
+{
+public:
+	bool Next() override { return false; }
+};
+
 // Added in Deus Ex and Unreal 227
 class AllObjectsIterator : public Iterator
 {

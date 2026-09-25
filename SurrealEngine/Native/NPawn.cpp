@@ -332,6 +332,7 @@ void NPawn::LineOfSightTo_Deus(UObject* Self, UObject* Other, std::optional<bool
 void NPawn::ReachablePathnodes(UObject* Self, UObject* BaseClass, UObject*& NavPoint, UObject* FromPoint, float& distance, std::optional<bool> bUsePrunedPaths)
 {
 	LogUnimplemented("Pawn.ReachablePathnodes");
+	Frame::CreatedIterator = std::make_unique<EmptyIterator>();
 }
 
 void NPawn::StrafeFacing_Deus(UObject* Self, const vec3& NewDestination, UObject* NewTarget, std::optional<float> speed)
