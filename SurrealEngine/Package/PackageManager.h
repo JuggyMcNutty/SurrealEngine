@@ -96,6 +96,7 @@ public:
 	bool MissingSESystemIni() const { return missing_se_system_ini; }
 
 	Package* GetTransientPackage() { return GetPackage("Transient"); }
+	Package* CreateEmptyPackage(const NameString& name);
 
 private:
 	void CreateTransientPackage();

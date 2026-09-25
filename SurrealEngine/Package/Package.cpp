@@ -12,6 +12,8 @@ Package::Package(PackageManager* packageManager, const NameString& name, const s
 {
 	if (!filepath.empty())
 		ReadTables();
+	else
+		Version = 68; // a package born empty carries the version the writer emits, or its own save cannot be read back
 
 	FileName = fs::path(FilePath).filename().string();
 	FileExtension = fs::path(FilePath).extension().string();

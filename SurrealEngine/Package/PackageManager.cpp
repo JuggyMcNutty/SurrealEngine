@@ -339,6 +339,14 @@ void PackageManager::CreateTransientPackage()
 	packages["Transient"].set(GC::Alloc<Package>(this, "Transient", ""));
 }
 
+Package* PackageManager::CreateEmptyPackage(const NameString& name)
+{
+	auto& pkg = packages[name];
+	if (!pkg)
+		pkg.set(GC::Alloc<Package>(this, name, ""));
+	return pkg.get();
+}
+
 Package* PackageManager::GetPackage(const NameString& name)
 {
 	auto& package = packages[name];

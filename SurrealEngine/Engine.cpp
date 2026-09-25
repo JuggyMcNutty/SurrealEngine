@@ -92,9 +92,12 @@ Engine::Engine(GameLaunchInfo launchinfo) : LaunchInfo(launchinfo)
 		deusExPackage = packages->GetPackage("DeusEx");
 		dxgc = UObject::Cast<UGC>(transientpkg->NewObject("gc", extpkg->GetClass("GC"), ObjectFlags::Transient));
 		dxgc->Canvas() = canvas;
-		// In package DeusEx, not transient: Package::Save refuses an object
-		// from another package, so a transient save info stopped every save.
-		dxSaveInfo = UObject::Cast<UDXSaveInfo>(deusExPackage->NewObject("MyDeusExSaveInfo", deusExPackage->GetClass("DeusExSaveInfo"), ObjectFlags::NoFlags));
+		// In a little package of its own, as the original's GetSaveInfo(pkg)
+		// makes it: Package::Save refuses an object from another package
+		// (transient stopped every save), and saving it from package DeusEx
+		// exported the DeusExSaveInfo class into SaveInfo.dxs, whose load
+		// then re-registered the class's natives, a fatal error.
+		dxSaveInfo = UObject::Cast<UDXSaveInfo>(packages->CreateEmptyPackage("SaveInfo")->NewObject("MyDeusExSaveInfo", deusExPackage->GetClass("DeusExSaveInfo"), ObjectFlags::NoFlags));
 		dxConMissionList = UObject::Cast<UConversationMissionList>(packages->GetPackage("DeusExConText")->GetUObject("ConversationMissionList", "ConMissionList"));
 	}
 
@@ -290,7 +293,7 @@ void Engine::Run()
 			LoginPlayer();
 		}
 
-		if (ClientTravelInfo.URL.HasOption("load"))
+		if (ClientTravelInfo.URL.HasOption("load") || (packages->IsDeusEx() && ClientTravelInfo.URL.HasOption("loadgame")))
 		{
 			UnrealURL url(ClientTravelInfo.URL);
 			LoadFromSaveFile(url);
@@ -782,11 +785,35 @@ void Engine::LoadFromSaveFile(const UnrealURL& url)
 
 	Package* savefilePackage = nullptr;
 	uint32_t slotNum = 0;
+	std::string deusExMapName;
 
 	if (url.HasOption("load"))
 	{
 		slotNum = Convert::to_uint32(url.GetOption("load"));
 		savefilePackage = packages->LoadSaveSlot(slotNum);
+	}
+
+	if (!savefilePackage && packages->IsDeusEx() && url.HasOption("loadgame"))
+	{
+		// The original's Browse ?loadgame=N (docs/re/deusex-dll.md, travel
+		// and saving): read the slot's SaveInfo, empty Current, copy the
+		// slot into it, and load the info's map from Current. -1 is the
+		// quick save.
+		const int32_t slot = Convert::to_int32(url.GetOption("loadgame"));
+		const std::string folder = SaveSlotFolderName(slot);
+		packages->ScanSaveInfos();
+		if (Package* infoPkg = packages->GetSaveInfoPackage(folder))
+		{
+			if (auto info = UObject::Cast<UDXSaveInfo>(infoPkg->GetUObject("DeusExSaveInfo", "MyDeusExSaveInfo")))
+			{
+				deusExMapName = info->MapName();
+				DeleteSaveGameFiles("Current");
+				CopySaveGameFiles(folder, "Current");
+				savefilePackage = packages->LoadSaveFile("Current/" + deusExMapName + "." + packages->GetSaveExtension());
+			}
+		}
+		if (!savefilePackage)
+			LogMessage("LoadGame: no save in slot " + std::to_string(slot));
 	}
 
 	if (!savefilePackage)
@@ -812,7 +839,8 @@ void Engine::LoadFromSaveFile(const UnrealURL& url)
 
 	// LevelInfo->URL is not serialized, so it is
 	// never restored by loading the save package and must be rebuilt
-	std::string realMapName = packages->GetIniValue("user", "SaveGame", "MapName" + std::to_string(slotNum));
+	std::string realMapName = !deusExMapName.empty() ? deusExMapName
+		: packages->GetIniValue("user", "SaveGame", "MapName" + std::to_string(slotNum));
 	if (realMapName.empty())
 		realMapName = LevelPackage->GetPackageName().ToString();
 	LevelInfo->URL = UnrealURL(realMapName);
@@ -933,12 +961,12 @@ void Engine::SaveGameToSlot(int32_t slotNum, const std::string& saveDescription)
 		// carries.
 		const auto saveInfoName = "SaveInfo." + packages->GetSaveExtension();
 		fs::remove(saveSlotFolder / saveInfoName);
-		deusExPackage->Save(dxSaveInfo, (saveSlotFolder / saveInfoName).string());
+		dxSaveInfo->package->Save(dxSaveInfo, (saveSlotFolder / saveInfoName).string());
 		const auto currentFolder = saveFolderPath / "Current";
 		if (fs::exists(currentFolder))
 		{
 			fs::remove(currentFolder / saveInfoName);
-			deusExPackage->Save(dxSaveInfo, (currentFolder / saveInfoName).string());
+			dxSaveInfo->package->Save(dxSaveInfo, (currentFolder / saveInfoName).string());
 		}
 
 		const auto levelName = Level->package->GetPackageName().ToString() + "." + packages->GetSaveExtension();
