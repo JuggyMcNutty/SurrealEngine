@@ -77,5 +77,10 @@ public:
 		vec3 Center = { 0.0f };
 		float Radius = 0.0f;
 		int MoverID = 0;
+		// Its lightmaps are rebuilt when the mover moved or turned since
+		bool HasLastTransform = false;
+		vec3 LastLocation = { 0.0f };
+		Rotator LastRotation = Rotator(0, 0, 0);
+		int MovedFrame = -1;
 	} Light;
 };

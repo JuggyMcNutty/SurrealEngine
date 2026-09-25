@@ -278,6 +278,7 @@ private:
 	float LastTickElapsed = 0.0f;
 
 	Array<UActor*> TempDynLightList;
+	Array<int> TempAnimatedIndexList;
 	LightActorTree LightTree;
 
 	// What the light tree was last built from: each light, where it is and

@@ -3,6 +3,7 @@
 #include "LightSystem.h"
 #include "RenderDevice/RenderDevice.h"
 #include "Engine.h"
+#include "Packages/Engine/USurrealClient.h"
 #include "Render/RenderSubsystem.h"
 #include "Math/hsb.h"
 #include "Packages/Engine/Actors/Brush/UMover.h"
@@ -128,11 +129,17 @@ TextureInfo LightSystem::GetLightmap(UModel* model, int lightmapIndex, const Coo
 
 	int lastStaticUpdate = -100;
 	int lastDynamicUpdate = -100;
+	bool noDynamicLights = engine->client->NoDynamicLights;
 	TempDynLightList.clear();
+	TempAnimatedIndexList.clear();
 
 	if (!dynamicMover)
 	{
-		// Examine all the lights that are statically baked into the map:
+		// The surface's own lights: the still ones are the kept static
+		// map's; an animating one is added over it every frame, through
+		// its shadow bits (docs/re/render-dll.md, light maps). With
+		// NoDynamicLights, animated lights count as static and moving
+		// ones are left out.
 
 		if (lmindex.LightActors >= 0)
 		{
@@ -141,33 +148,54 @@ TextureInfo LightSystem::GetLightmap(UModel* model, int lightmapIndex, const Coo
 			{
 				UActor* light = lightlist[lightindex];
 				CheckLight(light);
-				lastStaticUpdate = std::max(lastStaticUpdate, light->Light.LastUpdate);
+				if (!noDynamicLights && LightmapBuilder::LightAnimates(light))
+				{
+					TempAnimatedIndexList.push_back(lightindex);
+					lastDynamicUpdate = FrameCounter;
+				}
+				else
+				{
+					lastStaticUpdate = std::max(lastStaticUpdate, light->Light.LastUpdate);
+				}
 
 				// Mark the light as visited so the second pass doesn't pick it up
 				light->Light.LightmapCheckCounter = checkCounter;
 			}
 		}
 
-		// Look at all lights potentially touching the surface. They go into our dynamic light list:
+		// The moving lights over the surface go into the dynamic light list:
 
-		for (UActor* light : CollectSurfaceLights(model, lightmapIndex, worldLocation, radius))
+		if (!noDynamicLights)
 		{
-			if (light->Light.LightmapCheckCounter != checkCounter)
+			for (UActor* light : CollectSurfaceLights(model, lightmapIndex, worldLocation, radius))
 			{
-				light->Light.LightmapCheckCounter = checkCounter;
-				if (!light->bStatic() && !light->bNoDelete() && light->bSpecialLit() == specialLit)
+				if (light->Light.LightmapCheckCounter != checkCounter)
 				{
-					CheckLight(light);
-					lastDynamicUpdate = std::max(lastDynamicUpdate, light->Light.LastUpdate);
-					TempDynLightList.push_back(light);
+					light->Light.LightmapCheckCounter = checkCounter;
+					if (!light->bStatic() && !light->bNoDelete() && light->bSpecialLit() == specialLit)
+					{
+						CheckLight(light);
+						lastDynamicUpdate = std::max(lastDynamicUpdate, light->Light.LastUpdate);
+						TempDynLightList.push_back(light);
+					}
 				}
 			}
 		}
 	}
 	else
 	{
-		// To do: ideally we only want to do this if the mover moved
-		lastDynamicUpdate = FrameCounter;
+		// A mover's maps are rebuilt when the mover moved or turned
+		// since, or one of its lights changed
+		if (!dynamicMover->Light.HasLastTransform ||
+			dynamicMover->Light.LastLocation != dynamicMover->Location() ||
+			dynamicMover->Light.LastRotation != dynamicMover->Rotation())
+		{
+			dynamicMover->Light.HasLastTransform = true;
+			dynamicMover->Light.LastLocation = dynamicMover->Location();
+			dynamicMover->Light.LastRotation = dynamicMover->Rotation();
+			dynamicMover->Light.MovedFrame = FrameCounter;
+		}
+		lastDynamicUpdate = dynamicMover->Light.MovedFrame;
 
 		for (UActor* light : dynamicMover->TouchingLights.List)
 		{
@@ -211,6 +239,7 @@ TextureInfo LightSystem::GetLightmap(UModel* model, int lightmapIndex, const Coo
 			Builder.LoadStaticLight(lmtexture->StaticLightColors);
 		}
 
+		Builder.AddAnimatedLights(model, lightmapIndex, TempAnimatedIndexList);
 		Builder.AddDynamicLights(model, lightmapIndex, TempDynLightList);
 
 		UnrealMipmap& lmmip = lmtexture->Mip;

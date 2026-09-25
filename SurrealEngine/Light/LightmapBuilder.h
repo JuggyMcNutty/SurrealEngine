@@ -17,7 +17,15 @@ public:
 	void Setup(UModel* model, const Coords& mapCoords, int lightMap);
 	void SetAmbientLight(UZoneInfo* zoneActor);
 	void AddStaticLights(UModel* model, int lightMap);
+	void AddAnimatedLights(UModel* model, int lightMap, const Array<int>& lightIndices);
 	void AddDynamicLights(UModel* model, int lightMap, const Array<UActor*>& lights);
+
+	// Whether the light's brightness or shape changes over time: any type
+	// past steady, and the animating effects (a searchlight only with a
+	// period). A still light belongs in a surface's kept static map; an
+	// animating one is added over it each frame
+	// (docs/re/render-dll.md, light maps).
+	static bool LightAnimates(UActor* light);
 
 	void LoadStaticLight(const Array<vec3>& staticLightColors);
 	void SaveStaticLight(Array<vec3>& staticLightColors);

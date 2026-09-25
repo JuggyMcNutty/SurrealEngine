@@ -9,6 +9,7 @@
 #include "Math/coords.h"
 #include "Utils/Random.h"
 #include "Engine.h"
+#include "Packages/Engine/USurrealClient.h"
 
 LightSystem::LightSystem()
 {
@@ -59,14 +60,6 @@ void LightSystem::BeginFrame()
 		if (lightType == LT_None || actor->LightBrightness() == 0)
 			continue;
 
-		bool needsUpdate = false;
-
-		if (lightType > LT_Steady && lightType != LT_BackdropLight)
-		{
-			// Always invalidate lights that pulse and blink
-			needsUpdate = true;
-		}
-
 		// Flicker lights flickered randomly every frame in UE1 but this looks terrible at higher refresh rates.
 		// Use an upper cap on how often it will flicker that roughly matches what was probably intended.
 		if (lightType == LT_Flicker && actor->Light.NextFlickerTime < actor->Level()->TimeSeconds())
@@ -76,44 +69,9 @@ void LightSystem::BeginFrame()
 			actor->Light.FlickerRandom = (RandInt(1) != 0);
 		}
 
-		// Some light effects animate
-		uint8_t lightEffect = actor->LightEffect();
-		switch (lightEffect)
-		{
-		default:
-		case LE_None:
-		case LE_Warp:
-		case LE_CloudCast:
-		case LE_Unused:
-		case LE_OmniBumpMap:
-		case LE_Cylinder:
-		case LE_NonIncidence:
-		case LE_StaticSpot:
-		case LE_Spotlight:
-		case LE_Shell:
-			// These don't animate
-			break;
-
-		case LE_Searchlight:
-			// This one only updates if it has a light period
-			if (actor->LightPeriod() != 0)
-				needsUpdate = true;
-			break;
-
-		case LE_TorchWaver:
-		case LE_FireWaver:
-		case LE_WateryShimmer:
-		case LE_SlowWave:
-		case LE_FastWave:
-		case LE_Shock:
-		case LE_Disco:
-		case LE_Interference:
-		case LE_Rotor:
-			needsUpdate = true;
-			break;
-		}
-
-		if (needsUpdate)
+		// An animating light invalidates what was built from it -- unless
+		// the client's NoDynamicLights stills it
+		if (LightmapBuilder::LightAnimates(actor) && !engine->client->NoDynamicLights)
 			actor->Light.LastUpdate = FrameCounter;
 
 		LightTree.Lights.push_back(actor);

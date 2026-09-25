@@ -1,6 +1,8 @@
 
 #include "Precomp.h"
 #include "LightmapBuilder.h"
+#include "Engine.h"
+#include "Packages/Engine/USurrealClient.h"
 #include "Packages/Engine/Resources/UPalette.h"
 #include "Packages/Engine/Resources/Level/UModel.h"
 #include "Packages/Engine/Actors/Info/UZoneInfo.h"
@@ -78,6 +80,11 @@ void LightmapBuilder::AddStaticLights(UModel* model, int lightMap)
 			UActor* light = lightlist[lightindex];
 			if (light->LightType() != LT_None && light->LightBrightness() > 0)
 			{
+				// An animating light is added over the kept static map
+				// each frame instead (AddAnimatedLights), unless the
+				// client's NoDynamicLights stills it into the map here
+				if (LightAnimates(light) && !engine->client->NoDynamicLights)
+					continue;
 				FindLitSpans(light);
 				if (spans.empty())
 					continue;
@@ -86,6 +93,54 @@ void LightmapBuilder::AddStaticLights(UModel* model, int lightMap)
 				AddLightContribution(light);
 			}
 		}
+	}
+}
+
+void LightmapBuilder::AddAnimatedLights(UModel* model, int lightMap, const Array<int>& lightIndices)
+{
+	// The surface's own animating lights, each over its shadow bits, added
+	// to the loaded static map every frame
+	const LightMapIndex& lmindex = model->LightMap[lightMap];
+	if (lmindex.LightActors < 0)
+		return;
+	UActor** lightlist = &model->Lights[lmindex.LightActors];
+	for (int lightindex : lightIndices)
+	{
+		UActor* light = lightlist[lightindex];
+		if (light->LightType() != LT_None && light->LightBrightness() > 0)
+		{
+			FindLitSpans(light);
+			if (spans.empty())
+				continue;
+			Shadow.Load(model, lightMap, lightindex);
+			Effect.Run(light, width, spans, WorldLocations(), base, WorldNormal(), Shadow.Pixels(), illuminationmap.data());
+			AddLightContribution(light);
+		}
+	}
+}
+
+bool LightmapBuilder::LightAnimates(UActor* light)
+{
+	uint8_t lightType = light->LightType();
+	if (lightType > LT_Steady && lightType != LT_BackdropLight)
+		return true;
+
+	switch (light->LightEffect())
+	{
+	case LE_Searchlight:
+		return light->LightPeriod() != 0;
+	case LE_TorchWaver:
+	case LE_FireWaver:
+	case LE_WateryShimmer:
+	case LE_SlowWave:
+	case LE_FastWave:
+	case LE_Shock:
+	case LE_Disco:
+	case LE_Interference:
+	case LE_Rotor:
+		return true;
+	default:
+		return false;
 	}
 }
 
