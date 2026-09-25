@@ -220,6 +220,7 @@
 #include "Packages/Extension/Windows/UComputerWindow.h"
 #include "Packages/Extension/Windows/UGC.h"
 #include "Packages/Extension/Windows/UListWindow.h"
+#include "Packages/Engine/UEventManager.h"
 #include "Packages/Extension/Windows/UScaleManagerWindow.h"
 #include "Packages/Extension/Windows/UScaleWindow.h"
 #include "Packages/Extension/Windows/UScrollAreaWindow.h"
@@ -1374,6 +1375,7 @@ void PackageManager::RegisterNativeClasses()
 		RegisterNativeClass<UListWindow>(extensionPackage, "ListWindow", "Window");
 		RegisterNativeClass<UComputerWindow>(extensionPackage, "ComputerWindow", "Window");
 		RegisterNativeClass<UBorderWindow>(extensionPackage, "BorderWindow", "Window");
+		RegisterNativeClass<UEventManager>(enginePackage, "EventManager", "Object");
 		RegisterNativeClass<UDeusExPlayer>(deusExPackage, "DeusExPlayer", "PlayerPawnExt");
 		RegisterNativeClass<UScriptedPawn>(deusExPackage, "ScriptedPawn", "Pawn");
 		RegisterNativeClass<UDeusExDecoration>(deusExPackage, "DeusExDecoration", "Decoration");

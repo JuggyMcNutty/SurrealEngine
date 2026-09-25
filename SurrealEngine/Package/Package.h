@@ -21,6 +21,10 @@ public:
 
 	UObject* NewObject(const NameString& objname, UClass* objclass, ObjectFlags flags, bool initProperties = true);
 
+	// Makes a runtime-made class findable in this package, so a save's
+	// import of it resolves on load (the AI event manager's has no script).
+	void AddRuntimeExport(UObject* obj);
+
 	UObject* GetUObject(int objref);
 	UObject* GetUObject(const NameString& className, const NameString& objectName) { return GetUObject(className, objectName, {}, true); }
 	UObject* GetUObject(const NameString& className, const NameString& objectName, const NameString& group, bool ignoreGroup = false);

@@ -106,6 +106,34 @@ UObject* Package::NewObject(const NameString& objname, UClass* objclass, ObjectF
 	Exception::Throw("Could not find the native class for " + objname.ToString());
 }
 
+void Package::AddRuntimeExport(UObject* obj)
+{
+	int nameIndex;
+	auto it = NameHash.find(obj->Name);
+	if (it != NameHash.end())
+	{
+		nameIndex = it->second;
+	}
+	else
+	{
+		nameIndex = (int)NameTable.size();
+		NameTableEntry nameEntry;
+		nameEntry.Name = obj->Name;
+		nameEntry.Flags = 0;
+		NameTable.push_back(nameEntry);
+		NameHash[obj->Name] = nameIndex;
+	}
+
+	ExportTableEntry entry = {};
+	entry.ObjClass = 0; // a class
+	entry.ObjName = nameIndex;
+	entry.ObjFlags = obj->Flags;
+	ExportTable.push_back(entry);
+	ExportObjects.push_back(obj);
+	obj->package = this;
+	obj->exportIndex = (uint32_t)(ExportTable.size() - 1);
+}
+
 void Package::LoadExportObject(int index)
 {
 	const ExportTableEntry* entry = &ExportTable[index];

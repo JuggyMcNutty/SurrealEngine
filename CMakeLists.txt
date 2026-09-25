@@ -505,6 +505,8 @@ set(SURREALCOMMON_SOURCES
 	SurrealEngine/Packages/Engine/UCanvas.h
 	SurrealEngine/Packages/Engine/UClient.h
 	SurrealEngine/Packages/Engine/UConsole.h
+	SurrealEngine/Packages/Engine/UEventManager.cpp
+	SurrealEngine/Packages/Engine/UEventManager.h
 	SurrealEngine/Packages/Engine/UPlayer.h
 	SurrealEngine/Packages/Engine/URenderIterator.h
 	SurrealEngine/Packages/Engine/USurrealClient.cpp

@@ -3,6 +3,7 @@
 #include "NLevelInfo.h"
 #include "VM/NativeFunc.h"
 #include "Packages/Engine/Actors/Info/ULevelInfo.h"
+#include "Packages/Engine/UEventManager.h"
 #include "Utils/Logger.h"
 #include "Engine.h"
 
@@ -61,6 +62,5 @@ void NLevelInfo::GetLocZone_U227k(UObject* Self, const vec3& Pos, std::optional<
 
 void NLevelInfo::InitEventManager(UObject* Self)
 {
-	LogUnimplemented("LevelInfo.InitEventManager");
-	// Deus Ex
+	UEventManager::InitEventManager(UObject::Cast<ULevelInfo>(Self));
 }

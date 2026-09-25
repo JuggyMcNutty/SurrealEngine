@@ -91,6 +91,21 @@ Engine::Engine(GameLaunchInfo launchinfo) : LaunchInfo(launchinfo)
 		// exported the DeusExSaveInfo class into SaveInfo.dxs, whose load
 		// then re-registered the class's natives, a fatal error.
 		dxSaveInfo = UObject::Cast<UDXSaveInfo>(packages->CreateEmptyPackage("SaveInfo")->NewObject("MyDeusExSaveInfo", deusExPackage->GetClass("DeusExSaveInfo"), ObjectFlags::NoFlags));
+
+		// The AI event manager's class is the original Engine.dll's own,
+		// with no script -- Engine.u only declares LevelInfo's property of
+		// it -- so the class is made here and added to the Engine package,
+		// where a level's manager and a save's import of it resolve.
+		{
+			UClass* objectClass = UObject::Cast<UClass>(packages->GetPackage("Core")->GetUObject("Class", "Object"));
+			UClass* emClass = GC::Alloc<UClass>(NameString("EventManager"), objectClass, ObjectFlags::Native | ObjectFlags::Public | ObjectFlags::Standalone);
+			emClass->Class = UObject::Cast<UClass>(packages->GetPackage("Core")->GetUObject("Class", "Class"));
+			emClass->Properties = objectClass->Properties;
+			emClass->StructSize = objectClass->StructSize;
+			emClass->StructAlignment = objectClass->StructAlignment;
+			emClass->PropertyData.Init(emClass);
+			packages->GetPackage("Engine")->AddRuntimeExport(emClass);
+		}
 	}
 
 	std::string consolestr = packages->GetIniValue("system", "Engine.Engine", "Console");

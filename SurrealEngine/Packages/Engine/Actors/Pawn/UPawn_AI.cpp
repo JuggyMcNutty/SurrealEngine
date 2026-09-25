@@ -175,10 +175,26 @@ bool UPawn::CheckIfBestTarget(UActor* actor, float& bestAim, float& bestDist, co
 	return true;
 }
 
-float UPawn::AICanHear(UActor* other, std::optional<float> volume, std::optional<float> radius)
+// The original's AICanHear (0x103c7680), which only the event manager
+// calls: 0 unless other is bDetectable and the volume above 0; a radius of
+// 800 when none above 0 is given; vertical distance counts double; at or
+// beyond the radius 0, else (1 - distance / radius) times the volume, less
+// the pawn's HearingThreshold, held between 0 and 1.
+float UPawn::AICanHear(UActor* other, std::optional<float> volumeArg, std::optional<float> radiusArg)
 {
-	LogUnimplemented("Pawn.AICanHear() [Deus Ex]");
-	return 0.0f;
+	float volume = volumeArg.value_or(1.0f);
+	float radius = radiusArg.value_or(0.0f);
+	if (radius <= 0.0f)
+		radius = 800.0f;
+	if (!other || !other->bDetectable() || volume <= 0.0f)
+		return 0.0f;
+
+	vec3 delta = other->Location() - Location();
+	delta.z *= 2.0f;
+	float distance = length(delta);
+	if (distance >= radius)
+		return 0.0f;
+	return std::clamp((1.0f - distance / radius) * volume - HearingThreshold(), 0.0f, 1.0f);
 }
 
 // How much of something size degrees across, angle degrees off the middle of

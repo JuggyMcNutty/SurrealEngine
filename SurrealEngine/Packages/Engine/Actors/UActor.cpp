@@ -3,6 +3,7 @@
 #include "UActor.h"
 #include "Packages/Core/UClass.h"
 #include "Packages/Core/Properties/UBoolProperty.h"
+#include "Packages/Engine/UEventManager.h"
 #include "Packages/Engine/UViewport.h"
 #include "Packages/Engine/Actors/USpawnNotify.h"
 #include "Packages/Engine/Actors/Info/ULevelInfo.h"
@@ -133,6 +134,14 @@ bool UActor::Destroy()
 	SetBase(nullptr, true);
 
 	engine->audiodev->ActorDestroyed(this);
+
+	// The event manager marks the actor's events for deletion, and it
+	// stops being any listener's best sender.
+	if (engine->LaunchInfo.IsDeusEx())
+	{
+		if (UEventManager* manager = UEventManager::Get())
+			manager->ActorDestroyed(this);
+	}
 
 	ULevel* level = XLevel();
 
@@ -447,17 +456,20 @@ bool UActor::IsOSVer2kOrXP()
 
 void UActor::AIClearEvent(const NameString& eventName)
 {
-	LogUnimplemented("Actor.AIClearEvent");
+	if (UEventManager* manager = UEventManager::Get())
+		manager->ClearEvent(this, eventName);
 }
 
 void UActor::AIClearEventCallback(const NameString& eventName)
 {
-	LogUnimplemented("Actor.AIClearEventCallback");
+	if (UEventManager* manager = UEventManager::Get())
+		manager->ClearEventCallback(this, eventName);
 }
 
 void UActor::AIEndEvent(const NameString& eventName, uint8_t eventType)
 {
-	LogUnimplemented("Actor.AIEndEvent");
+	if (UEventManager* manager = UEventManager::Get())
+		manager->EndEvent(this, eventName, eventType);
 }
 
 float UActor::AIGetLightLevel(const vec3& Location)
@@ -468,20 +480,20 @@ float UActor::AIGetLightLevel(const vec3& Location)
 
 void UActor::AISendEvent(const NameString& eventName, uint8_t eventType, std::optional<float> Value, std::optional<float> Radius)
 {
-	LogUnimplemented("Actor.AISendEvent");
-	//LogUnimplemented(Name.ToString() + ": AISendEvent('" + eventName.ToString() + "')");
+	if (UEventManager* manager = UEventManager::Get())
+		manager->SendEvent(this, eventName, eventType, Value.value_or(1.0f), Radius.value_or(800.0f), false);
 }
 
 void UActor::AISetEventCallback(const NameString& eventName, const NameString& callback, std::optional<NameString> scoreCallback, std::optional<bool> bCheckVisibility, std::optional<bool> bCheckDir, std::optional<bool> bCheckCylinder, std::optional<bool> bCheckLOS)
 {
-	LogUnimplemented("Actor.AISetEventCallback");
-	//LogMessage(Name.ToString() + ": AISetEventCallback('" + eventName.ToString() + "')");
+	if (UEventManager* manager = UEventManager::Get())
+		manager->SetEventCallback(this, eventName, callback, scoreCallback.value_or(NameString()), bCheckVisibility.value_or(true), bCheckDir.value_or(true), bCheckCylinder.value_or(false), bCheckLOS.value_or(true));
 }
 
 void UActor::AIStartEvent(const NameString& eventName, uint8_t eventType, std::optional<float> Value, std::optional<float> Radius)
 {
-	LogUnimplemented("Actor.AIStartEvent");
-	//LogUnimplemented(Name.ToString() + ": AIStartEvent('" + eventName.ToString() + "')");
+	if (UEventManager* manager = UEventManager::Get())
+		manager->SendEvent(this, eventName, eventType, Value.value_or(1.0f), Radius.value_or(800.0f), true);
 }
 
 // A light's share of what the AI sees by, 0 to 1: its brightness, a third of

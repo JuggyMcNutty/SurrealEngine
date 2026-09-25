@@ -5,6 +5,7 @@
 #include "Packages/Engine/Actors/Pawn/UPlayerPawn.h"
 #include "Packages/Engine/Actors/NavigationPoint/UNavigationPoint.h"
 #include "Packages/Engine/Resources/Level/UModel.h"
+#include "Packages/Engine/UEventManager.h"
 #include "Engine.h"
 #include "VM/ScriptCall.h"
 
@@ -114,6 +115,14 @@ void ULevel::Tick(float elapsed, bool gamePaused)
 		{
 			if (Actors[i])
 				TickActor(elapsed, Actors[i]);
+		}
+
+		// The AI event manager is ticked after the actors, on a full tick
+		// with the game not paused, as the original's ULevel::Tick does.
+		if (engine->LaunchInfo.IsDeusEx() && this == engine->Level && engine->LevelInfo && engine->LevelInfo->Pauser().empty())
+		{
+			if (UEventManager* manager = UEventManager::Get())
+				manager->Tick();
 		}
 	}
 

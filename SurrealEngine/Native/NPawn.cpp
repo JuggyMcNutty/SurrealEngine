@@ -289,8 +289,9 @@ void NPawn::pointReachable(UObject* Self, const vec3& aPoint, BitfieldBool& Retu
 
 void NPawn::AICanHear(UObject* Self, UObject* Other, std::optional<float> Volume, std::optional<float> Radius, float& ReturnValue)
 {
-	LogUnimplemented("Pawn.AICanHear");
-	ReturnValue = 0.0f;
+	// No script calls it; the event manager does.
+	UPawn* selfPawn = UObject::Cast<UPawn>(Self);
+	ReturnValue = selfPawn->AICanHear(UObject::Cast<UActor>(Other), Volume, Radius);
 }
 
 void NPawn::AICanSee(UObject* Self, UObject* Other, std::optional<float> Visibility, std::optional<bool> bCheckVisibility, std::optional<bool> bCheckDir, std::optional<bool> bCheckCylinder, std::optional<bool> bCheckLOS, float& ReturnValue)
@@ -301,7 +302,7 @@ void NPawn::AICanSee(UObject* Self, UObject* Other, std::optional<float> Visibil
 
 void NPawn::AICanSmell(UObject* Self, UObject* Other, std::optional<float> Smell, float& ReturnValue)
 {
-	LogUnimplemented("Pawn.AICanSmell");
+	// The original always returns 0: nothing smells in this build.
 	ReturnValue = 0.0f;
 }
 
