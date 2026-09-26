@@ -47,6 +47,7 @@ public:
 	int Channels = 16;
 	uint8_t MusicVolume = 160;
 	uint8_t SoundVolume = 200;
+	uint8_t SpeechVolume = 255;   // Deus Ex's Speech slider; other games play speech at SoundVolume
 	float AmbientFactor = 0.7f;
 
 	void LoadProperties(const NameString& from = "") override;

@@ -49,6 +49,8 @@ std::string USurrealAudioDevice::GetPropertyAsString(const NameString& propertyN
 		return IniPropertyConverter<uint8_t>::ToString(MusicVolume);
 	else if (propertyName == "SoundVolume")
 		return IniPropertyConverter<uint8_t>::ToString(SoundVolume);
+	else if (propertyName == "SpeechVolume")
+		return IniPropertyConverter<uint8_t>::ToString(SpeechVolume);
 	else if (propertyName == "AmbientFactor")
 		return IniPropertyConverter<float>::ToString(AmbientFactor);
 
@@ -88,6 +90,8 @@ void USurrealAudioDevice::SetPropertyFromString(const NameString& propertyName, 
 		MusicVolume = IniPropertyConverter<uint8_t>::FromString(value);
 	else if (propertyName == "SoundVolume")
 		SoundVolume = IniPropertyConverter<uint8_t>::FromString(value);
+	else if (propertyName == "SpeechVolume")
+		SpeechVolume = IniPropertyConverter<uint8_t>::FromString(value);
 	else if (propertyName == "AmbientFactor")
 		AmbientFactor = IniPropertyConverter<float>::FromString(value);
 	else
@@ -118,6 +122,7 @@ void USurrealAudioDevice::LoadProperties(const NameString& from)
 	Channels = IniPropertyConverter<int>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "Channels", Channels);
 	MusicVolume = IniPropertyConverter<uint8_t>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "MusicVolume", MusicVolume);
 	SoundVolume = IniPropertyConverter<uint8_t>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "SoundVolume", SoundVolume);
+	SpeechVolume = IniPropertyConverter<uint8_t>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "SpeechVolume", SpeechVolume);
 	AmbientFactor = IniPropertyConverter<float>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "AmbientFactor", AmbientFactor);
 }
 
@@ -138,6 +143,7 @@ void USurrealAudioDevice::SaveConfig()
 	engine->packages->SetIniValue("System", Class, "Channels", IniPropertyConverter<int>::ToString(Channels));
 	engine->packages->SetIniValue("System", Class, "MusicVolume", IniPropertyConverter<uint8_t>::ToString(MusicVolume));
 	engine->packages->SetIniValue("System", Class, "SoundVolume", IniPropertyConverter<uint8_t>::ToString(SoundVolume));
+	engine->packages->SetIniValue("System", Class, "SpeechVolume", IniPropertyConverter<uint8_t>::ToString(SpeechVolume));
 	engine->packages->SetIniValue("System", Class, "AmbientFactor", IniPropertyConverter<float>::ToString(AmbientFactor));
 }
 
@@ -185,10 +191,21 @@ void USurrealAudioDevice::Update(const mat4& listener)
 	UpdateMusic();
 
 	m_Device->SetMusicVolume(MusicVolume / 255.0f);
-	// Deus Ex: the slider is the whole scale, as Galaxy's (its speech kept the same
-	// level: the talk slot's old x2 and this halving cancelled). Other games keep
-	// the halving their normalized volumes were tuned against.
-	m_Device->SetSoundVolume(SoundVolume / 255.0f * (engine->LaunchInfo.IsDeusEx() ? 1.0f : 0.5f));
+	if (engine->LaunchInfo.IsDeusEx())
+	{
+		// Each sound plays at its own slider, speech at the Speech slider, as the
+		// original's (galaxy-dll.md, Volume). Galaxy's equal-sliders quirk -- both
+		// scaled by the slider twice -- is not carried.
+		m_Device->SetSoundVolume(SoundVolume / 255.0f);
+		m_Device->SetSpeechVolume(SpeechVolume / 255.0f);
+	}
+	else
+	{
+		// Other games keep the halving their normalized volumes were tuned against,
+		// speech at the Sound slider with the rest.
+		m_Device->SetSoundVolume(SoundVolume / 255.0f * 0.5f);
+		m_Device->SetSpeechVolume(SoundVolume / 255.0f * 0.5f);
+	}
 	m_Device->Update();
 }
 
@@ -337,7 +354,7 @@ void USurrealAudioDevice::UpdateSounds(const mat4& listener)
 			}
 			else
 			{
-				m_Device->PlaySound((int)i, Playing.Sound, Playing.Location, Playing.Volume, Playing.Radius, Playing.Pitch);
+				m_Device->PlaySound((int)i, Playing.Sound, Playing.Location, Playing.Volume, Playing.Radius, Playing.Pitch, (Playing.Id & 14) == SLOT_Talk * 2);
 				Playing.IsActive = true;
 			}
 		}
@@ -503,6 +520,7 @@ void USurrealAudioDevice::BreakpointTriggered()
 	if (m_Device)
 	{
 		m_Device->SetSoundVolume(0.0f);
+		m_Device->SetSpeechVolume(0.0f);
 		m_Device->Update();
 	}
 }

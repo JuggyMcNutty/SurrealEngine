@@ -133,6 +133,18 @@ public:
 		}
 	}
 
+	// Which slider gains this source: the Speech slider for the talk slot,
+	// the Sound slider for the rest (galaxy-dll.md, Volume).
+	void SetSpeech(bool newSpeech)
+	{
+		speech = newSpeech;
+	}
+
+	bool IsSpeech() const
+	{
+		return speech;
+	}
+
 	void SetVolume(float newVolume)
 	{
 		if (volume != newVolume)
@@ -192,6 +204,7 @@ private:
 	float pitch = 0.0f;
 	float dopplerFactor = 0.0f;
 	bool bIs3d = false;
+	bool speech = false;
 };
 
 // TODO list:
@@ -343,7 +356,7 @@ public:
 		musicThreadData.musicUpdate = true;
 	}
 
-	void PlaySound(int channel, USound* sound, vec3& location, float volume, float radius, float pitch) override
+	void PlaySound(int channel, USound* sound, vec3& location, float volume, float radius, float pitch, bool speech) override
 	{
 		if (!std::isfinite(volume) || volume < 0.0f || !std::isfinite(pitch) || channel >= sources.size())
 			Exception::Throw("Invalid PlaySound arguments");
@@ -357,8 +370,9 @@ public:
 
 		source.SetSound(sound);
 		source.SetPosition(location);
+		source.SetSpeech(speech);
 		source.SetVolume(volume);
-		source.SetGlobalVolume(globalSoundVolume);
+		source.SetGlobalVolume(speech ? globalSpeechVolume : globalSoundVolume);
 		source.SetRadius(radius);
 		source.SetPitch(pitch);
 		source.SetSpatial(true);
@@ -374,7 +388,7 @@ public:
 
 		source.SetPosition(location);
 		source.SetVolume(volume);
-		source.SetGlobalVolume(globalSoundVolume);
+		source.SetGlobalVolume(source.IsSpeech() ? globalSpeechVolume : globalSoundVolume);
 		source.SetRadius(radius);
 		source.SetPitch(pitch);
 
@@ -475,7 +489,21 @@ public:
 		globalSoundVolume = volume;
 
 		for (auto& soundSource : sources)
-			soundSource.SetGlobalVolume(globalSoundVolume);
+		{
+			if (!soundSource.IsSpeech())
+				soundSource.SetGlobalVolume(globalSoundVolume);
+		}
+	}
+
+	void SetSpeechVolume(float volume) override
+	{
+		globalSpeechVolume = volume;
+
+		for (auto& soundSource : sources)
+		{
+			if (soundSource.IsSpeech())
+				soundSource.SetGlobalVolume(globalSpeechVolume);
+		}
 	}
 
 	void Update() override
@@ -701,6 +729,7 @@ public:
 	float targetMusicVolume = 0.0f;
 	float fadeRate = 0.0f;
 	float globalSoundVolume = 1.0f;
+	float globalSpeechVolume = 1.0f;
 };
 
 std::unique_ptr<AudioDevice> AudioDevice::Create(int frequency, int numVoices, int musicBufferCount, int musicBufferSize)

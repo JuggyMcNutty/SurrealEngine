@@ -1032,21 +1032,22 @@ void NActor::RandomBiasedRotation(
 	ReturnValue = UActor::RandomBiasedRotation(centralYaw, yawDistribution, centralPitch, pitchDistribution);
 }
 
+// Deus Ex's menu sliders as they move. The subsystem's own field is what
+// changes: its Update() writes the sliders to the device every frame, so a
+// value set on the device alone would last one frame.
 void NActor::SetInstantMusicVolume(UObject* Self, uint8_t newMusicVolume)
 {
-	// Deus Ex
-	engine->audiodev->GetDevice()->SetMusicVolume(static_cast<float>(newMusicVolume) / 255.f);
+	engine->audiodev->MusicVolume = newMusicVolume;
 }
 
 void NActor::SetInstantSoundVolume(UObject* Self, uint8_t newSoundVolume)
 {
-	// Deus Ex
-	engine->audiodev->GetDevice()->SetSoundVolume(static_cast<float>(newSoundVolume) / 255.f);
+	engine->audiodev->SoundVolume = newSoundVolume;
 }
 
 void NActor::SetInstantSpeechVolume(UObject* Self, uint8_t newSpeechVolume)
 {
-	LogUnimplemented("Actor.SetInstantSpeechVolume");
+	engine->audiodev->SpeechVolume = newSpeechVolume;
 }
 
 void NActor::StopSound_Deus(UObject* Self, int Id)

@@ -21,11 +21,12 @@ public:
 	virtual void RemoveSound(USound* sound) = 0;
 	virtual bool IsPlaying(int channel) = 0;
 	virtual int GetTotalChannels() = 0;
-	virtual void PlaySound(int channel, USound* sound, vec3& location, float volume, float radius, float pitch) = 0;
+	virtual void PlaySound(int channel, USound* sound, vec3& location, float volume, float radius, float pitch, bool speech = false) = 0;
 	virtual void PlayMusic(std::unique_ptr<AudioSource> source) = 0;
 	virtual void UpdateSound(int channel, USound* sound, vec3& location, float volume, float radius, float pitch) = 0;
 	virtual void StopSound(int channel) = 0;
 	virtual void SetMusicVolume(float volume) = 0;
 	virtual void SetSoundVolume(float volume) = 0;
+	virtual void SetSpeechVolume(float volume) = 0;
 	virtual void Update() = 0;
 };
