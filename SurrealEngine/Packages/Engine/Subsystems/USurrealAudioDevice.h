@@ -4,6 +4,8 @@
 #include "Packages/Engine/Resources/USound.h"
 #include "Audio/AudioDevice.h"
 
+#include <chrono>
+
 class UActor;
 class UMusic;
 class UViewport;
@@ -24,6 +26,7 @@ struct PlayingSound
 	float Radius = 1.0f;
 	float Pitch = 1.0f;
 	float StartTime = 0.0f;
+	float ObstructionTime = 0.0f;   // Deus Ex: how long the level's BSP has stood in the way, 0 to 0.5 s
 };
 
 class USurrealAudioDevice : public UAudioSubsystem
@@ -77,7 +80,8 @@ public:
 private:
 	void StartAmbience();
 	void UpdateAmbience();
-	void UpdateSounds(const mat4& listener);
+	void UpdateSounds(const mat4& listener, float timeStep);
+	void UpdateObstruction(PlayingSound& Playing, float timeStep);
 
 	void UpdateLipSync(PlayingSound& Playing);
 	void UpdateMusic();
@@ -92,4 +96,5 @@ private:
 	UMusic* CurrentSong = nullptr;
 	int CurrentSection = 255;
 	int FreeSlot = 0x07ffffff;
+	std::chrono::steady_clock::time_point m_LastUpdateTime;
 };

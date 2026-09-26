@@ -12,6 +12,7 @@
 #include "Packages/Engine/Resources/UMusic.h"
 #include "Packages/Engine/Resources/USound.h"
 #include "Packages/Engine/Resources/Level/ULevel.h"
+#include "Collision/BottomLevel/TraceRayModel.h"
 
 static float square(float x) { return x * x; }
 
@@ -191,9 +192,15 @@ void USurrealAudioDevice::SetViewport(UViewport* InViewport)
 
 void USurrealAudioDevice::Update(const mat4& listener)
 {
+	// The update's own time step, 0 to 1 s, as Galaxy's (galaxy-dll.md, Each
+	// frame); the obstruction fade runs on it.
+	auto now = std::chrono::steady_clock::now();
+	float timeStep = std::clamp(std::chrono::duration<float>(now - m_LastUpdateTime).count(), 0.0f, 1.0f);
+	m_LastUpdateTime = now;
+
 	StartAmbience();
 	UpdateAmbience();
-	UpdateSounds(listener);
+	UpdateSounds(listener, timeStep);
 	UpdateMusic();
 
 	m_Device->SetMusicVolume(MusicVolume / 255.0f);
@@ -330,7 +337,7 @@ void USurrealAudioDevice::UpdateLipSync(PlayingSound& Playing)
 	pawn->nextPhoneme() = std::string(1, letter);
 }
 
-void USurrealAudioDevice::UpdateSounds(const mat4& listener)
+void USurrealAudioDevice::UpdateSounds(const mat4& listener, float timeStep)
 {
 	if (!m_Viewport || !m_Viewport->Actor())
 		return;
@@ -351,12 +358,22 @@ void USurrealAudioDevice::UpdateSounds(const mat4& listener)
 
 			UpdateLipSync(Playing);
 
+			// Deus Ex: a wall between the player's eyes and the sound fades it
+			// toward a third of its volume over half a second, and back as it
+			// clears (galaxy-dll.md, Sounds behind walls).
+			float volume = Playing.Volume;
+			if (engine->LaunchInfo.IsDeusEx())
+			{
+				UpdateObstruction(Playing, timeStep);
+				volume *= std::max(1.0f - 2.0f * Playing.ObstructionTime, 0.33f);
+			}
+
 			// Update the sound.
 			if (Playing.IsActive)
 			{
 				if (m_Device->IsPlaying((int)i))
 				{
-					m_Device->UpdateSound((int)i, Playing.Sound, Playing.Location, Playing.Volume, Playing.Radius, Playing.Pitch);
+					m_Device->UpdateSound((int)i, Playing.Sound, Playing.Location, volume, Playing.Radius, Playing.Pitch);
 				}
 				else
 				{
@@ -365,11 +382,45 @@ void USurrealAudioDevice::UpdateSounds(const mat4& listener)
 			}
 			else
 			{
-				m_Device->PlaySound((int)i, Playing.Sound, Playing.Location, Playing.Volume, Playing.Radius, Playing.Pitch, (Playing.Id & 14) == SLOT_Talk * 2);
+				m_Device->PlaySound((int)i, Playing.Sound, Playing.Location, volume, Playing.Radius, Playing.Pitch, (Playing.Id & 14) == SLOT_Talk * 2);
 				Playing.IsActive = true;
 			}
 		}
 	}
+}
+
+void USurrealAudioDevice::UpdateObstruction(PlayingSound& Playing, float timeStep)
+{
+	// Speech is never muffled, nor a sound whose actor has gone.
+	if (!Playing.Actor || (Playing.Id & 14) == SLOT_Talk * 2)
+	{
+		Playing.ObstructionTime = 0.0f;
+		return;
+	}
+
+	// The line runs from the player's own eyes -- the player's place and
+	// EyeHeight, even when viewing through another actor -- to the sound's
+	// actor, and only the level's BSP blocks it: movers and actors do not,
+	// as the original's UModel::FastLineCheck has it.
+	UActor* player = m_Viewport->Actor();
+	vec3 eyes = player->Location();
+	if (UPawn* pawn = UObject::TryCast<UPawn>(player))
+		eyes.z += pawn->EyeHeight();
+
+	bool blocked = false;
+	dvec3 origin = to_dvec3(eyes);
+	dvec3 direction = to_dvec3(Playing.Location) - origin;
+	double tmax = length(direction);
+	if (tmax > 0.01)
+	{
+		TraceRayModel trace;
+		blocked = trace.TraceAnyHit(player->XLevel()->Model, origin, 0.01, direction * (1.0 / tmax), tmax, true);
+	}
+
+	if (blocked)
+		Playing.ObstructionTime = std::min(Playing.ObstructionTime + timeStep, 0.5f);
+	else
+		Playing.ObstructionTime = std::max(Playing.ObstructionTime - timeStep, 0.0f);
 }
 
 void USurrealAudioDevice::UpdateMusic()
