@@ -485,6 +485,17 @@ public:
 		return module->read_interleaved_stereo(GetFrequency(), samples / GetChannels(), output);
 	}
 
+	int GetOrder() override
+	{
+		return module ? (int)module->get_current_order() : -1;
+	}
+
+	void SetOrder(int order) override
+	{
+		if (module)
+			module->set_position_order_row(order, 0);
+	}
+
 	openmpt::module* module;
 };
 

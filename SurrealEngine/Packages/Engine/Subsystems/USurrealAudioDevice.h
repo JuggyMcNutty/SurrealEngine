@@ -84,7 +84,7 @@ private:
 	void UpdateObstruction(PlayingSound& Playing, float timeStep);
 
 	void UpdateLipSync(PlayingSound& Playing);
-	void UpdateMusic();
+	void UpdateMusic(float timeStep);
 	void StopSound(size_t index);
 
 	static float SoundPriority(UViewport* Viewport, vec3 Location, float Volume, float Radius);
@@ -97,4 +97,10 @@ private:
 	int CurrentSection = 255;
 	int FreeSlot = 0x07ffffff;
 	std::chrono::steady_clock::time_point m_LastUpdateTime;
+
+	// Deus Ex's music transition: the playing song fades out first, then the
+	// new one starts at full volume (galaxy-dll.md, Music).
+	bool m_MusicTransition = false;
+	float m_MusicFadeLength = 0.0f;
+	float m_MusicFadeLeft = 0.0f;
 };

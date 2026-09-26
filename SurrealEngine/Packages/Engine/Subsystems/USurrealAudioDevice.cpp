@@ -234,9 +234,12 @@ void USurrealAudioDevice::Update(const mat4& listener)
 	StartAmbience();
 	UpdateAmbience();
 	UpdateSounds(listener, timeStep);
-	UpdateMusic();
+	UpdateMusic(timeStep);
 
-	m_Device->SetMusicVolume(MusicVolume / 255.0f);
+	float musicFade = 1.0f;
+	if (m_MusicTransition && m_MusicFadeLength > 0.0f)
+		musicFade = std::max(m_MusicFadeLeft, 0.0f) / m_MusicFadeLength;
+	m_Device->SetMusicVolume(MusicVolume / 255.0f * musicFade);
 	if (engine->LaunchInfo.IsDeusEx())
 	{
 		// Each sound plays at its own slider, speech at the Speech slider, as the
@@ -462,40 +465,124 @@ void USurrealAudioDevice::UpdateObstruction(PlayingSound& Playing, float timeSte
 		Playing.ObstructionTime = std::max(Playing.ObstructionTime - timeStep, 0.0f);
 }
 
-void USurrealAudioDevice::UpdateMusic()
+// Builds the source for a song; a tracker module starts at the given order.
+static std::unique_ptr<AudioSource> CreateMusicSource(UMusic* song, int order)
 {
-	if (m_Viewport && m_Viewport->Actor() && m_Viewport->Actor()->Transition() != MTRAN_None)
+	std::unique_ptr<AudioSource> source;
+	if (song->Format == "mp3" || song->Format == "mp2")
+		source = AudioSource::CreateMp3(song->Data);
+	else if (song->Format == "ogg" || song->Format == "event") // Some ogg files in Unreal 227 have event as format for some reason
+		source = AudioSource::CreateOgg(song->Data, true);
+	else if (song->Format == "wav")
+		source = AudioSource::CreateWav(song->Data);
+	else
 	{
-		// To do: this needs to fade out the old song before switching
+		source = AudioSource::CreateMod(song->Data, true, 0);
+		if (source && order > 0)
+			source->SetOrder(order);
+	}
+	return source;
+}
 
-		if (CurrentSong)
+void USurrealAudioDevice::UpdateMusic(float timeStep)
+{
+	if (!m_Viewport || !m_Viewport->Actor())
+		return;
+
+	if (!engine->LaunchInfo.IsDeusEx())
+	{
+		// Other games keep the fork's instant switch.
+		if (m_Viewport->Actor()->Transition() != MTRAN_None)
+		{
+			if (CurrentSong)
+			{
+				m_Device->PlayMusic({});
+				CurrentSong = nullptr;
+			}
+
+			CurrentSong = m_Viewport->Actor()->Song();
+			CurrentSection = m_Viewport->Actor()->SongSection();
+
+			if (CurrentSong && UseDigitalMusic)
+			{
+				auto source = CreateMusicSource(CurrentSong, CurrentSection != 255 ? CurrentSection : 0);
+				if (source)
+					m_Device->PlayMusic(std::move(source));
+			}
+
+			m_Viewport->Actor()->Transition() = MTRAN_None;
+		}
+		return;
+	}
+
+	auto* player = m_Viewport->Actor();
+
+	if (!m_MusicTransition && player->Transition() != MTRAN_None)
+	{
+		// The playing music fades out first: 1 s for MTRAN_Fade, 5 s for
+		// MTRAN_SlowFade, 1/3 s for MTRAN_FastFade, at once for the others,
+		// plus twice Latency (galaxy-dll.md, Music).
+		float length = 0.0f;
+		switch (player->Transition())
+		{
+		case MTRAN_Fade: length = 1.0f; break;
+		case MTRAN_SlowFade: length = 5.0f; break;
+		case MTRAN_FastFade: length = 1.0f / 3.0f; break;
+		default: break;
+		}
+		if (length > 0.0f)
+			length += 2.0f * Latency / 1000.0f;
+		if (!CurrentSong)
+			length = 0.0f;   // nothing plays, nothing to fade
+		m_MusicTransition = true;
+		m_MusicFadeLength = length;
+		m_MusicFadeLeft = length;
+	}
+
+	if (m_MusicTransition)
+	{
+		m_MusicFadeLeft -= timeStep;
+		if (m_MusicFadeLeft > 0.0f)
+			return;
+
+		// The fade is done: the player's Song starts at full volume at the
+		// order SongSection -- a different song is loaded, the same one only
+		// jumps -- and section 255 is silence (galaxy-dll.md, Music).
+		UMusic* song = player->Song();
+		int section = player->SongSection();
+		if (!song || section == 255 || !UseDigitalMusic)
 		{
 			m_Device->PlayMusic({});
 			CurrentSong = nullptr;
 		}
-
-		CurrentSong = m_Viewport->Actor()->Song();
-		CurrentSection = m_Viewport->Actor()->SongSection();
-
-		if (CurrentSong && UseDigitalMusic)
+		else if (song == CurrentSong)
 		{
-			int subsong = CurrentSection != 255 ? CurrentSection : 0;
-
-			std::unique_ptr<AudioSource> source;
-			if (CurrentSong->Format == "mp3" || CurrentSong->Format == "mp2")
-				source = AudioSource::CreateMp3(CurrentSong->Data);
-			else if (CurrentSong->Format == "ogg" || CurrentSong->Format == "event") // Some ogg files in Unreal 227 have event as format for some reason
-				source = AudioSource::CreateOgg(CurrentSong->Data, true);
-			else if (CurrentSong->Format == "wav")
-				source = AudioSource::CreateWav(CurrentSong->Data);
-			else
-				source = AudioSource::CreateMod(CurrentSong->Data, true, subsong);
-
-			if (source)
-				m_Device->PlayMusic(std::move(source));
+			m_Device->SetMusicOrder(section);
 		}
-
-		m_Viewport->Actor()->Transition() = MTRAN_None;
+		else
+		{
+			auto source = CreateMusicSource(song, section);
+			m_Device->PlayMusic(std::move(source));
+			CurrentSong = song;
+		}
+		CurrentSection = section;
+		m_MusicTransition = false;
+		m_MusicFadeLength = 0.0f;
+		m_MusicFadeLeft = 0.0f;
+		player->Transition() = MTRAN_None;
+	}
+	else if (CurrentSong)
+	{
+		// Where the music is: while no transition waits, each frame writes the
+		// order playing back into the player's SongSection, so the ambient
+		// track comes back where it was after a fight or a conversation
+		// (galaxy-dll.md, Music).
+		int order = m_Device->GetMusicOrder();
+		if (order >= 0)
+		{
+			player->SongSection() = (uint8_t)order;
+			CurrentSection = order;
+		}
 	}
 }
 

@@ -23,6 +23,11 @@ public:
 	virtual void SeekToSample(uint64_t position) = 0;
 	virtual size_t ReadSamples(float* output, size_t samples) = 0;
 
+	// Tracker music's position in its order list (UE1's SongSection); -1 and
+	// a no-op for sources without orders.
+	virtual int GetOrder() { return -1; }
+	virtual void SetOrder(int order) {}
+
 	bool bIsLooped = false;
 	uint32_t loopStart = 0;
 	uint32_t loopEnd = 0;

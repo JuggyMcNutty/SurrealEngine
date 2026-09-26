@@ -8,6 +8,7 @@
 #include "Packages/Engine/Resources/USound.h"
 #include <mutex>
 #include "Utils/Exception.h"
+#include <atomic>
 #include <map>
 #include <cmath>
 #include <queue>
@@ -360,6 +361,18 @@ public:
 		std::unique_lock lock(musicThreadData.mutex);
 		musicThreadData.music = std::move(source);
 		musicThreadData.musicUpdate = true;
+		musicThreadData.currentOrder.store(-1);
+	}
+
+	int GetMusicOrder() override
+	{
+		return musicThreadData.currentOrder.load();
+	}
+
+	void SetMusicOrder(int order) override
+	{
+		std::unique_lock lock(musicThreadData.mutex);
+		musicThreadData.jumpOrder = order;
 	}
 
 	void PlaySound(int channel, USound* sound, vec3& location, float volume, float radius, float pitch, bool speech) override
@@ -553,11 +566,19 @@ public:
 				currentMusic = std::move(musicThreadData.music);
 				musicThreadData.musicUpdate = false;
 			}
+			int jumpOrder = musicThreadData.jumpOrder;
+			musicThreadData.jumpOrder = -1;
 			lock.unlock();
-			// Never touch anything from musicThreadData after this point.
+			// Never touch anything from musicThreadData after this point
+			// (currentOrder is atomic and written below).
+
+			if (jumpOrder >= 0 && currentMusic)
+				currentMusic->SetOrder(jumpOrder);
 
 			if (currentMusic)
 			{
+				musicThreadData.currentOrder.store(currentMusic->GetOrder());
+
 				while (musicQueue.Size() < musicBufferCount)
 				{
 					// render a chunk of music
@@ -725,6 +746,8 @@ public:
 		bool exitFlag = false;
 		std::unique_ptr<AudioSource> music;
 		bool musicUpdate = false;
+		int jumpOrder = -1;                     // an order to jump the playing song to
+		std::atomic<int> currentOrder{ -1 };    // the order playing, written by the music thread alone
 	} musicThreadData;
 
 	RingQueue<float*> musicQueue;

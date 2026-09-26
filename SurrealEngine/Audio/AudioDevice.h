@@ -28,5 +28,9 @@ public:
 	virtual void SetMusicVolume(float volume) = 0;
 	virtual void SetSoundVolume(float volume) = 0;
 	virtual void SetSpeechVolume(float volume) = 0;
+	// The playing music's order (UE1's SongSection), -1 while unknown, and a
+	// jump to another order without reloading the song.
+	virtual int GetMusicOrder() = 0;
+	virtual void SetMusicOrder(int order) = 0;
 	virtual void Update() = 0;
 };
