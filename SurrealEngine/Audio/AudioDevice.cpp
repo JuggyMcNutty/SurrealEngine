@@ -17,6 +17,7 @@
 #include <AL/al.h>
 #include <AL/alc.h>
 #include <AL/alext.h>
+#include <AL/efx.h>
 
 #define UU_PER_METER 43
 
@@ -278,6 +279,34 @@ public:
 		// TODO: how do we prioritize mono vs stereo source count?
 		sources.resize(monoSources);
 
+		// EFX for the zones' reverb: one aux slot every sound sends to. With
+		// the slot's effect NULL the send is silent, so an off reverb costs
+		// nothing; without EFX, SetReverb is a no-op.
+		if (alcIsExtensionPresent(alDevice, "ALC_EXT_EFX"))
+		{
+			alGenEffects = (LPALGENEFFECTS)alGetProcAddress("alGenEffects");
+			alDeleteEffects = (LPALDELETEEFFECTS)alGetProcAddress("alDeleteEffects");
+			alEffecti = (LPALEFFECTI)alGetProcAddress("alEffecti");
+			alEffectf = (LPALEFFECTF)alGetProcAddress("alEffectf");
+			alGenAuxiliaryEffectSlots = (LPALGENAUXILIARYEFFECTSLOTS)alGetProcAddress("alGenAuxiliaryEffectSlots");
+			alDeleteAuxiliaryEffectSlots = (LPALDELETEAUXILIARYEFFECTSLOTS)alGetProcAddress("alDeleteAuxiliaryEffectSlots");
+			alAuxiliaryEffectSloti = (LPALAUXILIARYEFFECTSLOTI)alGetProcAddress("alAuxiliaryEffectSloti");
+			if (alGenEffects && alDeleteEffects && alEffecti && alEffectf
+				&& alGenAuxiliaryEffectSlots && alDeleteAuxiliaryEffectSlots && alAuxiliaryEffectSloti)
+			{
+				alGetError();
+				alGenAuxiliaryEffectSlots(1, &alEffectSlot);
+				alGenEffects(1, &alReverbEffect);
+				alEffecti(alReverbEffect, AL_EFFECT_TYPE, AL_EFFECT_REVERB);
+				if (alGetError() == AL_NO_ERROR)
+				{
+					efxAvailable = true;
+					for (ALSoundSource& source : sources)
+						alSource3i(source.id, AL_AUXILIARY_SEND_FILTER, (ALint)alEffectSlot, 0, AL_FILTER_NULL);
+				}
+			}
+		}
+
 		// init music source/buffer
 		alGenSources(1, &alMusicSource);
 		alSourcei(alMusicSource, AL_SOURCE_SPATIALIZE_SOFT, AL_FALSE);
@@ -302,6 +331,12 @@ public:
 		alDeleteBuffers((ALsizei)alMusicBuffers.size(), &alMusicBuffers[0]);
 
 		sources.clear();
+
+		if (efxAvailable)
+		{
+			alDeleteEffects(1, &alReverbEffect);
+			alDeleteAuxiliaryEffectSlots(1, &alEffectSlot);
+		}
 
 		for (USound* sound : sounds)
 		{
@@ -367,6 +402,59 @@ public:
 	int GetMusicOrder() override
 	{
 		return musicThreadData.currentOrder.load();
+	}
+
+	// Galaxy's reverb is a six-tap echo network; EFX's is a reverb model, so
+	// this mapping is the fork's own (natives.md, Sound): the master gain and
+	// the cutoff carry over, the echo train gives the decay -- for a tap of
+	// delay d and gain g, repeating it decays 60 dB in d x ln(1000) / -ln(g)
+	// seconds, and the longest such tap sets AL_REVERB_DECAY_TIME -- and the
+	// earliest tap the reflections delay.
+	void SetReverb(const ReverbSettings* settings) override
+	{
+		if (!efxAvailable)
+			return;
+
+		if (!settings)
+		{
+			alAuxiliaryEffectSloti(alEffectSlot, AL_EFFECTSLOT_EFFECT, AL_EFFECT_NULL);
+			return;
+		}
+
+		float gain = std::clamp(settings->masterGain, 0.0f, 1.0f);
+
+		// A one-pole lowpass at the cutoff, read at EFX's 5 kHz reference.
+		float gainhf = 1.0f;
+		if (settings->cutoffHz < 44100.0f && settings->cutoffHz > 0.0f)
+		{
+			float ratio = 5000.0f / settings->cutoffHz;
+			gainhf = std::clamp(1.0f / std::sqrt(1.0f + ratio * ratio), 0.0f, 1.0f);
+		}
+
+		float decay = 0.1f;
+		float firstTap = 0.3f;
+		bool anyTap = false;
+		for (int i = 0; i < 6; i++)
+		{
+			float g = settings->gains[i];
+			float d = settings->delaySeconds[i];
+			if (g <= 0.0f || d <= 0.0f)
+				continue;
+			anyTap = true;
+			g = std::min(g, 0.999f);
+			decay = std::max(decay, d * 6.907755f / -std::log(g));
+			firstTap = std::min(firstTap, d);
+		}
+		decay = std::clamp(decay, 0.1f, 20.0f);
+		if (!anyTap)
+			firstTap = 0.007f;
+
+		alEffectf(alReverbEffect, AL_REVERB_GAIN, gain);
+		alEffectf(alReverbEffect, AL_REVERB_GAINHF, gainhf);
+		alEffectf(alReverbEffect, AL_REVERB_DECAY_TIME, decay);
+		alEffectf(alReverbEffect, AL_REVERB_REFLECTIONS_DELAY, std::clamp(firstTap, 0.0f, 0.3f));
+		// The changes reach the slot when the effect is loaded into it again.
+		alAuxiliaryEffectSloti(alEffectSlot, AL_EFFECTSLOT_EFFECT, (ALint)alReverbEffect);
 	}
 
 	void SetMusicOrder(int order) override
@@ -615,6 +703,18 @@ public:
 	Array<ALSoundSource> sources;
 	ALint monoSources = 0;
 	ALint stereoSources = 0;
+
+	// EFX, for the zones' reverb
+	bool efxAvailable = false;
+	ALuint alEffectSlot = 0;
+	ALuint alReverbEffect = 0;
+	LPALGENEFFECTS alGenEffects = nullptr;
+	LPALDELETEEFFECTS alDeleteEffects = nullptr;
+	LPALEFFECTI alEffecti = nullptr;
+	LPALEFFECTF alEffectf = nullptr;
+	LPALGENAUXILIARYEFFECTSLOTS alGenAuxiliaryEffectSlots = nullptr;
+	LPALDELETEAUXILIARYEFFECTSLOTS alDeleteAuxiliaryEffectSlots = nullptr;
+	LPALAUXILIARYEFFECTSLOTI alAuxiliaryEffectSloti = nullptr;
 
 	template<class T> class RingQueue
 	{

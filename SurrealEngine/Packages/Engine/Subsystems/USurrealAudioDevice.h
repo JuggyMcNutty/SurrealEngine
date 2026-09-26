@@ -9,6 +9,7 @@
 class UActor;
 class UMusic;
 class UViewport;
+class UZoneInfo;
 class AudioDevice;
 
 struct PlayingSound
@@ -85,6 +86,7 @@ private:
 
 	void UpdateLipSync(PlayingSound& Playing);
 	void UpdateMusic(float timeStep);
+	void UpdateReverb();
 	void StopSound(size_t index);
 
 	static float SoundPriority(UViewport* Viewport, vec3 Location, float Volume, float Radius);
@@ -103,4 +105,8 @@ private:
 	bool m_MusicTransition = false;
 	float m_MusicFadeLength = 0.0f;
 	float m_MusicFadeLeft = 0.0f;
+
+	// The reverb zone last set on the device, so it is set again only when it
+	// changes (galaxy-dll.md, Reverb).
+	UZoneInfo* m_ReverbZone = nullptr;
 };

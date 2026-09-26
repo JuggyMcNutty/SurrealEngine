@@ -9,6 +9,7 @@
 #include "Packages/Engine/Actors/Pawn/UPlayerPawn.h"
 #include "Packages/Engine/Actors/Pawn/UPawn.h"
 #include "Packages/Engine/Actors/Info/ULevelInfo.h"
+#include "Packages/Engine/Actors/Info/UZoneInfo.h"
 #include "Packages/Engine/Resources/UMusic.h"
 #include "Packages/Engine/Resources/USound.h"
 #include "Packages/Engine/Resources/Level/ULevel.h"
@@ -235,6 +236,7 @@ void USurrealAudioDevice::Update(const mat4& listener)
 	UpdateAmbience();
 	UpdateSounds(listener, timeStep);
 	UpdateMusic(timeStep);
+	UpdateReverb();
 
 	float musicFade = 1.0f;
 	if (m_MusicTransition && m_MusicFadeLength > 0.0f)
@@ -584,6 +586,40 @@ void USurrealAudioDevice::UpdateMusic(float timeStep)
 			CurrentSection = order;
 		}
 	}
+}
+
+void USurrealAudioDevice::UpdateReverb()
+{
+	if (!engine->LaunchInfo.IsDeusEx() || !m_Viewport || !m_Viewport->Actor())
+		return;
+
+	// With UseReverb, the zone of the player's view target with bReverbZone
+	// gives every sound its reverb -- MasterGain / 255 the volume, CutoffHz
+	// the damping of highs, six echoes of Delay x 2 ms at Gain / 255 --
+	// another zone gives none, and it is set again only when it changes
+	// (galaxy-dll.md, Reverb).
+	UActor* ViewActor = m_Viewport->Actor()->ViewTarget() ? m_Viewport->Actor()->ViewTarget() : m_Viewport->Actor();
+	UZoneInfo* zone = ViewActor->Region().Zone;
+	UZoneInfo* reverbZone = (UseReverb && zone && zone->bReverbZone()) ? zone : nullptr;
+	if (reverbZone == m_ReverbZone)
+		return;
+	m_ReverbZone = reverbZone;
+
+	if (!reverbZone)
+	{
+		m_Device->SetReverb(nullptr);
+		return;
+	}
+
+	ReverbSettings settings;
+	settings.masterGain = reverbZone->MasterGain() / 255.0f;
+	settings.cutoffHz = (float)std::min(reverbZone->CutoffHz(), 44100);
+	for (int i = 0; i < 6; i++)
+	{
+		settings.delaySeconds[i] = std::clamp(reverbZone->Delay()[i] * 2, 1, 340) / 1000.0f;
+		settings.gains[i] = reverbZone->Gain()[i] / 255.0f;
+	}
+	m_Device->SetReverb(&settings);
 }
 
 bool USurrealAudioDevice::PlaySound(UActor* Actor, int Id, USound* Sound, vec3 Location, float Volume, float Radius, float Pitch, bool isTalk)

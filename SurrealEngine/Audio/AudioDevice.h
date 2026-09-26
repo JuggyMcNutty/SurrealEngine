@@ -11,6 +11,16 @@
 class AudioSource;
 class USound;
 
+// A zone's reverb, as Galaxy takes it (galaxy-dll.md, Reverb): the master
+// gain, the high-frequency cutoff, and six echoes.
+struct ReverbSettings
+{
+	float masterGain = 0.0f;        // 0-1
+	float cutoffHz = 44100.0f;
+	float delaySeconds[6] = {};     // each echo's delay
+	float gains[6] = {};            // each echo's gain, 0-1
+};
+
 class AudioDevice
 {
 public:
@@ -32,5 +42,7 @@ public:
 	// jump to another order without reloading the song.
 	virtual int GetMusicOrder() = 0;
 	virtual void SetMusicOrder(int order) = 0;
+	// The reverb every sound plays through; nullptr turns it off.
+	virtual void SetReverb(const ReverbSettings* settings) = 0;
 	virtual void Update() = 0;
 };
