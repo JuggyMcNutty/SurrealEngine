@@ -148,10 +148,13 @@ uint8_t USound::LetterForHz(float hz)
 		float hzCutoff;
 		uint8_t letter;
 	};
+	// The original's bands (galaxy-dll.md, Lip sync): E at 250 Hz or below,
+	// then U, O, A, F, T upward. Its M shape is unreachable -- the test sits
+	// inside the 250-and-below branch -- so no M here either; the game's
+	// MouthM animation only ever came from a shape the original never gave.
 	static const Band bands[] =
 	{
-		{100.0f, 'E'},
-		{250.0f, 'M'},
+		{250.0f, 'E'},
 		{400.0f, 'U'},
 		{600.0f, 'O'},
 		{1500.0f, 'A'},

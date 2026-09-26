@@ -314,29 +314,20 @@ void USurrealAudioDevice::UpdateLipSync(PlayingSound& Playing)
 	if (!pawn)
 		return;
 
+	// bIsSpeaking is the script's alone: ConPlay sets it around a line and
+	// LipSynch's bWasSpeaking branch closes the mouth when it drops, so the
+	// original's Galaxy only reads it (galaxy-dll.md, Lip sync). Writing it
+	// here moved mouths on barks the script never opened.
+	if (!pawn->bIsSpeaking())
+		return;
+
 	float elapsedTime = engine->LevelInfo->TimeSeconds() - Playing.StartTime;
 	uint8_t letter = Playing.Sound->GetLipsyncLetterAt(elapsedTime);
 
 	if (!letter)
 		return;
 
-	pawn->bIsSpeaking() = true;
 	pawn->nextPhoneme() = std::string(1, letter);
-}
-
-// Called wherever a slot is torn down, so the mouth does not freeze mid-vowel.
-void USurrealAudioDevice::ClearLipSync(PlayingSound& Playing)
-{
-	if (!HasLipSync() || !Playing.Actor)
-		return;
-	if ((Playing.Id & 14) != SLOT_Talk * 2)
-		return;
-
-	if (UPawn* pawn = UObject::TryCast<UPawn>(Playing.Actor))
-	{
-		pawn->bIsSpeaking() = false;
-		pawn->nextPhoneme() = "X";   // X == MouthClosed
-	}
 }
 
 void USurrealAudioDevice::UpdateSounds(const mat4& listener)
@@ -369,7 +360,6 @@ void USurrealAudioDevice::UpdateSounds(const mat4& listener)
 				}
 				else
 				{
-					ClearLipSync(Playing);
 					PlayingSounds[i] = {};
 				}
 			}
@@ -523,7 +513,8 @@ void USurrealAudioDevice::StopSound(size_t index)
 		Playing.IsActive = false;
 	}
 
-	ClearLipSync(Playing);
+	// The mouth is left as it is: the script's LipSynch closes it when ConPlay
+	// drops bIsSpeaking, as the original does.
 	PlayingSounds[index] = {};
 }
 
@@ -575,5 +566,12 @@ float USurrealAudioDevice::SoundPriority(UViewport* Viewport, vec3 Location, flo
 	UActor* target = Viewport->Actor();
 	if (target && Viewport->Actor()->ViewTarget())
 		target = Viewport->Actor()->ViewTarget();
-	return target ? std::max(Volume * (1.0f - length(Location - target->Location()) / Radius), 0.0f) : 0.0f;
+	if (!target)
+		return 0.0f;
+	float priority = Volume * (1.0f - length(Location - target->Location()) / Radius);
+	// Galaxy lets a sound beyond its radius go negative: it never beats an empty
+	// channel's 0, so it is dropped even when one is free, and a playing sound
+	// that left its radius is the first stolen (galaxy-dll.md, Playing a sound).
+	// Other games keep the fork's floor, a free channel taken and held silent.
+	return engine->LaunchInfo.IsDeusEx() ? priority : std::max(priority, 0.0f);
 }

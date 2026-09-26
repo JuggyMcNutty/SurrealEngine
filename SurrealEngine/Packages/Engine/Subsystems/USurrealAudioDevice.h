@@ -80,7 +80,6 @@ private:
 	void UpdateSounds(const mat4& listener);
 
 	void UpdateLipSync(PlayingSound& Playing);
-	void ClearLipSync(PlayingSound& Playing);
 	void UpdateMusic();
 	void StopSound(size_t index);
 
