@@ -264,6 +264,12 @@ public:
 		alDistanceModel(AL_LINEAR_DISTANCE_CLAMPED);
 		alSpeedOfSound(343.3f / (1.0f / UU_PER_METER));
 
+		// Deus Ex works Doppler out itself, for ambient sounds only, from the
+		// actor's own speed at the subsystem's DopplerSpeed (galaxy-dll.md,
+		// Each frame); AL's listener-velocity Doppler shifted every sound.
+		if (UseGalaxyFalloff())
+			alDopplerFactor(0.0f);
+
 		// Init sound sources
 		alcGetIntegerv(alDevice, ALC_MONO_SOURCES, 1, &monoSources);
 		alcGetIntegerv(alDevice, ALC_STEREO_SOURCES, 1, &stereoSources);

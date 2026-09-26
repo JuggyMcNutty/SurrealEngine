@@ -49,6 +49,7 @@ public:
 	uint8_t SoundVolume = 200;
 	uint8_t SpeechVolume = 255;   // Deus Ex's Speech slider; other games play speech at SoundVolume
 	float AmbientFactor = 0.7f;
+	float DopplerSpeed = 6500.0f; // Deus Ex: the speed of sound for its ambient-only Doppler, units a second
 
 	void LoadProperties(const NameString& from = "") override;
 	void SaveConfig() override;

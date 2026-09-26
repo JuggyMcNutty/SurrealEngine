@@ -53,6 +53,8 @@ std::string USurrealAudioDevice::GetPropertyAsString(const NameString& propertyN
 		return IniPropertyConverter<uint8_t>::ToString(SpeechVolume);
 	else if (propertyName == "AmbientFactor")
 		return IniPropertyConverter<float>::ToString(AmbientFactor);
+	else if (propertyName == "DopplerSpeed")
+		return IniPropertyConverter<float>::ToString(DopplerSpeed);
 
 	LogMessage("Queried unknown property for SurrealAudioDevice: " + propertyName.ToString());
 	return {};
@@ -94,6 +96,8 @@ void USurrealAudioDevice::SetPropertyFromString(const NameString& propertyName, 
 		SpeechVolume = IniPropertyConverter<uint8_t>::FromString(value);
 	else if (propertyName == "AmbientFactor")
 		AmbientFactor = IniPropertyConverter<float>::FromString(value);
+	else if (propertyName == "DopplerSpeed")
+		DopplerSpeed = IniPropertyConverter<float>::FromString(value);
 	else
 		LogMessage("Setting unknown property for SurrealAudioDevice: " + propertyName.ToString());
 
@@ -124,6 +128,7 @@ void USurrealAudioDevice::LoadProperties(const NameString& from)
 	SoundVolume = IniPropertyConverter<uint8_t>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "SoundVolume", SoundVolume);
 	SpeechVolume = IniPropertyConverter<uint8_t>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "SpeechVolume", SpeechVolume);
 	AmbientFactor = IniPropertyConverter<float>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "AmbientFactor", AmbientFactor);
+	DopplerSpeed = IniPropertyConverter<float>::FromIniFile(*engine->packages->GetIniFile("System"), name_from, "DopplerSpeed", DopplerSpeed);
 }
 
 void USurrealAudioDevice::SaveConfig()
@@ -145,6 +150,7 @@ void USurrealAudioDevice::SaveConfig()
 	engine->packages->SetIniValue("System", Class, "SoundVolume", IniPropertyConverter<uint8_t>::ToString(SoundVolume));
 	engine->packages->SetIniValue("System", Class, "SpeechVolume", IniPropertyConverter<uint8_t>::ToString(SpeechVolume));
 	engine->packages->SetIniValue("System", Class, "AmbientFactor", IniPropertyConverter<float>::ToString(AmbientFactor));
+	engine->packages->SetIniValue("System", Class, "DopplerSpeed", IniPropertyConverter<float>::ToString(DopplerSpeed));
 }
 
 void USurrealAudioDevice::InitDevice()
@@ -264,6 +270,21 @@ void USurrealAudioDevice::UpdateAmbience()
 				Playing.Volume = 2.0f * (AmbientFactor * Playing.Actor->SoundVolume() / 255.0f);
 				Playing.Radius = Playing.Actor->WorldSoundRadius();
 				Playing.Pitch = Playing.Actor->SoundPitch() / 64.0f;
+
+				// Deus Ex's Doppler is the ambient sound's alone: the pitch times
+				// 1 - the actor's speed away from the view target / DopplerSpeed,
+				// kept to 0.5-2 (galaxy-dll.md, Each frame). AL's own Doppler is
+				// off for Deus Ex, so nothing else shifts.
+				if (engine->LaunchInfo.IsDeusEx() && DopplerSpeed > 0.0f)
+				{
+					vec3 away = Playing.Actor->Location() - ViewActor->Location();
+					float distance = length(away);
+					if (distance > 0.0f)
+					{
+						float speedAway = dot(Playing.Actor->Velocity(), away / distance);
+						Playing.Pitch *= std::clamp(1.0f - speedAway / DopplerSpeed, 0.5f, 2.0f);
+					}
+				}
 			}
 		}
 	}
